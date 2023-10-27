@@ -143,6 +143,9 @@ def unfold_fiber_data(
 
     # Unfold the fiber data and time array
     fiber_data = fiber_data.unfold(0, window_size, stride)
+
+    fiber_data = (fiber_data - fiber_data.mean()) / fiber_data.std()
+
     time_array = time_array.unfold(0, window_size, stride)
 
     # Return the unfolded fiber data and time array
@@ -168,7 +171,7 @@ def generate_latent_space(
 
     # Iterate through each batch in the fiber photometry data
     for i, batch in enumerate(fiber_dataloader):
-        print(f"Batch {i} of {len(fiber_dataloader)}\r", end="")
+        print(f"Batch {i} of {len(fiber_dataloader)}")
         temp_list.append(model.encoder(batch.unsqueeze(-1)).squeeze(-1).cpu().detach().numpy())
     print("")
 

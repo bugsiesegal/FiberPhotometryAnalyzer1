@@ -42,5 +42,5 @@ BATCH_SIZE=8
 for i in "${!FIBER_PATHS[@]}"; do
     # Run the Python script with the current combination of paths and constant model parameters
     python latent_generator_1.py "${FIBER_PATHS[$i]}" "${BEHAVIOR_PATHS[$i]}" "${OUTPUT_FOLDER_PATHS[$i]}" "$MODEL_PATH" \
-    --window_size "$WINDOW_SIZE" --stride "$STRIDE" --batch_size "$BATCH_SIZE" --umap --plot --pca_components=4
+    --window_size "$WINDOW_SIZE" --stride "$STRIDE" --batch_size "$BATCH_SIZE" --pca --plot --pca_components=4
 done
