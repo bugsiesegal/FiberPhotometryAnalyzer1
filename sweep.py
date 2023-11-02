@@ -16,21 +16,32 @@ sweep_config = {
             'max': 0.1
         },
         'window_size': {
-            'value': 100
+            'value': 1000
         },
         'embedding_size': {
             'distribution': 'int_uniform',
             'min': 2,
-            'max': 8
+            'max': 5
         },
         'batch_size': {
-            'distribution': 'int_uniform',
-            'min': 2,  # Adjust this range based on your requirements
-            'max': 12
+            'value': 8
         },
         'num_workers': {
             'value': 16
         },
+        'num_heads': {
+            'values': [1, 2, 4, 8]
+        },
+        'num_layers': {
+            'distribution': 'int_uniform',
+            'min': 2,
+            'max': 5
+        },
+        'dropout': {
+            'distribution': 'uniform',
+            'min': 0.0,
+            'max': 0.5
+        }
     }
 }
 
