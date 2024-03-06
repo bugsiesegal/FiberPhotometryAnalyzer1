@@ -1,3 +1,4 @@
+import json
 from typing import List, Tuple, Optional, Union
 import glob
 import math
@@ -297,11 +298,12 @@ def get_umap(data: pd.DataFrame, n_components: int = 2) -> UMAP:
     return umap
 
 
-def get_cebra(data: pd.DataFrame, n_components: int = 2, max_iterations=5000) -> CEBRA:
+def get_cebra(data: pd.DataFrame, n_components: int = 2, max_iterations=5000, learning_rate=1e-4,
+              batch_size=512) -> CEBRA:
     cebra_model = CEBRA(
         model_architecture="offset1-model-mse",
-        batch_size=512,
-        learning_rate=1e-4,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
         max_iterations=max_iterations,
         delta=0.1,
         conditional='delta',
@@ -309,6 +311,7 @@ def get_cebra(data: pd.DataFrame, n_components: int = 2, max_iterations=5000) ->
         distance='euclidean',
         device="cuda_if_available",
         verbose=True,
+        temperature_mode="auto",
     )
 
     inference_results = get_inference_results(data)
@@ -601,6 +604,274 @@ def plot_combinations_of_components(segmentation_results: pd.DataFrame, exclude_
     plt.close()
 
 
+class NumpyEncoder(json.JSONEncoder):
+    """ Custom encoder for numpy data types """
+
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.generic):
+            return obj.item()
+        return json.JSONEncoder.default(self, obj)
+
+
+def calculate_centroid_distance(data: pd.DataFrame, exclude_behaviors: Optional[List[str]] = None,
+                                save_path: Optional[Union[str, Path]] = None,
+                                centroid_save_path: Optional[Union[str, Path]] = None):
+    data_rows = data[data['behavior_or_fiber'] == 'fiber']
+
+    unique_behaviors = []
+
+    centroids = {}
+    centroid_distances = {}
+    for idx, row in data_rows.iterrows():
+        segmentation_results = row['segmentation_results']
+        if segmentation_results is None:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+        elif len(segmentation_results) == 0:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+
+        unique_behaviors.extend(segmentation_results['behavior'].fillna('None').unique())
+
+    unique_behaviors = list(set(unique_behaviors))
+
+    if exclude_behaviors:
+        unique_behaviors = [b for b in unique_behaviors if b not in exclude_behaviors]
+
+    for idx, row in data_rows.iterrows():
+        segmentation_results = row['segmentation_results']
+        if segmentation_results is None:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+        elif len(segmentation_results) == 0:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+
+        row_centroids = {}
+        for behavior in unique_behaviors:
+            if behavior == 'None':
+                mask = segmentation_results['behavior'].isna()
+            else:
+                mask = segmentation_results['behavior'] == behavior
+
+            row_centroids[behavior] = np.nanmean(segmentation_results[mask]['result'].tolist(), axis=0)
+
+        row_centroid_distances = {}
+        for behavior1, behavior2 in combinations(unique_behaviors, 2):
+            row_centroid_distances[(behavior1, behavior2)] = \
+                np.linalg.norm(row_centroids[behavior1] - row_centroids[behavior2])
+
+        centroid_distances[idx] = row_centroid_distances
+        centroids[idx] = row_centroids
+
+    animal_distances = {}
+    # Save centroid_distances as csv
+    for idx, row in data_rows.iterrows():
+        segmentation_results = row['segmentation_results']
+        if segmentation_results is None:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+        elif len(segmentation_results) == 0:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+        animal_distances[row['animal'] + '_' + row['pathway']
+                         + '_' + row['drug_or_vehicle'] + '_' + row['genotype']] = centroid_distances[idx]
+
+    animal_distances_pd = pd.DataFrame(animal_distances)
+    if centroid_save_path:
+        animal_distances_pd.to_csv(centroid_save_path)
+
+    # Calculate average centroid distances for each pair of behaviors for drugs and vehicles, pathways, and genotypes
+    average_centroid_distances = {}
+    for idx, row in data_rows.iterrows():
+        segmentation_results = row['segmentation_results']
+        if segmentation_results is None or len(segmentation_results) == 0:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+
+        pathway = row['pathway']
+        drug_or_vehicle = row['drug_or_vehicle']
+        genotype = row['genotype']  # Assuming that genotype data is available in the DataFrame
+
+        if pathway not in average_centroid_distances:
+            average_centroid_distances[pathway] = {}
+        if drug_or_vehicle not in average_centroid_distances[pathway]:
+            average_centroid_distances[pathway][drug_or_vehicle] = {}
+        if genotype not in average_centroid_distances[pathway][drug_or_vehicle]:
+            average_centroid_distances[pathway][drug_or_vehicle][genotype] = {}
+
+        for behavior1, behavior2 in combinations(unique_behaviors, 2):
+            if behavior1 not in average_centroid_distances[pathway][drug_or_vehicle][genotype]:
+                average_centroid_distances[pathway][drug_or_vehicle][genotype][behavior1] = {}
+            if behavior2 not in average_centroid_distances[pathway][drug_or_vehicle][genotype][behavior1]:
+                average_centroid_distances[pathway][drug_or_vehicle][genotype][behavior1][behavior2] = []
+
+            average_centroid_distances[pathway][drug_or_vehicle][genotype][behavior1][behavior2].append(
+                centroid_distances[idx][(behavior1, behavior2)])
+
+        # Flatten the dictionary into a list of dictionaries including genotype, standard deviation, and z-score
+        flat_data = []
+        for pathway, drug_vehicle_data in average_centroid_distances.items():
+            for drug_or_vehicle, genotype_data in drug_vehicle_data.items():
+                for genotype, behaviors_data in genotype_data.items():
+                    for behavior1, inner_dict in behaviors_data.items():
+                        for behavior2, distance_list in inner_dict.items():
+                            mean_distance = np.nanmean(distance_list)
+                            std_dev = np.nanstd(distance_list)  # Calculate the standard deviation
+
+                            # If standard deviation is zero, z-scores are not defined; we can set them to None or 0
+                            if std_dev == 0:
+                                z_scores = [None] * len(distance_list)
+                            else:
+                                # Calculate z-scores using the mean and std deviation
+                                z_scores = [(x - mean_distance) / std_dev for x in distance_list]
+
+                            # Add a column for mean z-score if applicable
+                            mean_z_score = np.nan if std_dev == 0 else np.nanmean(z_scores)
+
+                            flat_data.append({
+                                'Pathway': pathway,
+                                'DrugOrVehicle': drug_or_vehicle,
+                                'Genotype': genotype,
+                                'Behavior1': behavior1,
+                                'Behavior2': behavior2,
+                                'MeanDistance': mean_distance,
+                                'StdDev': std_dev,  # Add standard deviation to output
+                                'MeanZScore': mean_z_score  # Add mean z-score to output
+                            })
+
+    # Convert to DataFrame
+    centroid_distances_df = pd.DataFrame(flat_data)
+
+    # Print the DataFrame
+    print(centroid_distances_df.to_string())
+
+    # Save the DataFrame to a CSV file
+    if save_path:
+        centroid_distances_df.to_csv(save_path, index=False)
+
+    return centroid_distances_df
+
+
+def plot_combinations_of_components_of_animal(data: pd.DataFrame, animal: str, num_components: int = 2,
+                                              exclude_behaviors: Optional[List[str]] = None,
+                                              save_path: Optional[Union[str, Path]] = None):
+    data_rows = data[(data['animal'] == animal) & (data['behavior_or_fiber'] == 'fiber')]
+
+    n_columns = len(data_rows)
+    # Create subplots
+    width_scale = 10
+    height_scale = 6
+    fig_width = width_scale * n_columns
+    fig_height = height_scale * len(list(combinations(range(num_components), 2)))
+
+    fig, axs = plt.subplots(len(list(combinations(range(num_components), 2))), n_columns,
+                            figsize=(fig_width, fig_height))
+
+    i = 0
+    for idx, row in data_rows.iterrows():
+        segmentation_results = row['segmentation_results']
+        if segmentation_results is None:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+        elif len(segmentation_results) == 0:
+            warnings.warn("No segmentation results found for this fiber.", RuntimeWarning)
+            continue
+
+        unique_behaviors = segmentation_results['behavior'].fillna('None').unique()
+        if exclude_behaviors:
+            unique_behaviors = [b for b in unique_behaviors if b not in exclude_behaviors]
+
+        max_x = {}
+        min_x = {}
+        max_y = {}
+        min_y = {}
+
+        subplot_idx = 0
+        for idx1, idx2 in combinations(range(num_components), 2):
+            try:
+                ax = axs[subplot_idx, i]
+            except IndexError:
+                ax = axs[subplot_idx]
+
+            ax.set_title(f"Component {idx1 + 1} vs Component {idx2 + 1}")
+            ax.set_xlabel(f"Component {idx1 + 1}")
+            ax.set_ylabel(f"Component {idx2 + 1}")
+
+            for behavior in unique_behaviors:
+                if behavior == 'None':
+                    mask = segmentation_results['behavior'].isna()
+                else:
+                    mask = segmentation_results['behavior'] == behavior
+
+                x_data = segmentation_results[mask]['result'].apply(lambda x: x[idx1])
+                y_data = segmentation_results[mask]['result'].apply(lambda x: x[idx2])
+                color = behavior_to_color[behavior]
+
+                # Scatter plot for individual points
+                ax.scatter(x_data, y_data, c=[color] * len(x_data), label=behavior)
+
+                # Calculate centroid for the behavior group
+                centroid_x = x_data.mean()
+                centroid_y = y_data.mean()
+
+                # Update min and max values for the plot
+                if (idx1, idx2) not in max_x:
+                    max_x[(idx1, idx2)] = -np.inf
+                    min_x[(idx1, idx2)] = np.inf
+                    max_y[(idx1, idx2)] = -np.inf
+                    min_y[(idx1, idx2)] = np.inf
+
+                max_x[(idx1, idx2)] = max(max_x[(idx1, idx2)], max(x_data))
+                min_x[(idx1, idx2)] = min(min_x[(idx1, idx2)], min(x_data))
+                max_y[(idx1, idx2)] = max(max_y[(idx1, idx2)], max(y_data))
+                min_y[(idx1, idx2)] = min(min_y[(idx1, idx2)], min(y_data))
+
+                # Plot centroid with a distinguishable marker and size
+                ax.scatter(centroid_x, centroid_y, c='none', edgecolors='white', linewidths=2,
+                           marker='o', s=300, zorder=9)  # Halo behind the centroid
+
+                ax.scatter(centroid_x, centroid_y, c=color, edgecolors='black', linewidths=1,
+                           marker='o', s=200, zorder=10, label=f"{behavior} centroid")
+
+            ax.legend(title='Behavior', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+            subplot_idx += 1
+
+        i += 1
+
+    # Set the limits for all subplots
+    for i, idxs in enumerate(combinations(range(num_components), 2)):
+        idx1, idx2 = idxs
+        try:
+            if len(axs.shape) > 1:
+                for j, ax in enumerate(axs[i, :]):
+                    ax.set_xlim(xmin=min_x[(idx1, idx2)], xmax=max_x[(idx1, idx2)])
+                    ax.set_ylim(ymin=min_y[(idx1, idx2)], ymax=max_y[(idx1, idx2)])
+            else:
+                axs[i].set_xlim(xmin=min_x[(idx1, idx2)], xmax=max_x[(idx1, idx2)])
+                axs[i].set_ylim(ymin=min_y[(idx1, idx2)], ymax=max_y[(idx1, idx2)])
+        except UnboundLocalError:
+            pass
+
+    topmost_axes = axs[0, :] if len(axs.shape) > 1 else [axs[0]]
+
+    plt.tight_layout()
+
+    for i, ax in enumerate(topmost_axes):
+        # Set the title for the topmost axes, which will act as the column title
+        ax.set_title(f"Pathway: {data_rows.iloc[i]['pathway']}, Drug/Vehicle: {data_rows.iloc[i]['drug_or_vehicle']}")
+
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+
+    plt.close()
+
+
 def plot_density_based_combinations(segmentation_results: pd.DataFrame,
                                     exclude_behaviors: Optional[List[str]] = None,
                                     save_path: Optional[Union[str, Path]] = None):
@@ -679,7 +950,8 @@ def plot_density_based_combinations(segmentation_results: pd.DataFrame,
 
         subplot_idx += 1
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.tight_layout()
+
     if save_path:
         plt.savefig(save_path)
     else:
