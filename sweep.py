@@ -1,51 +1,17 @@
-import wandb
 from train import train
+import wandb
 
-wandb.login()
-
-sweep_config = {
-    'method': 'bayes',  # Here we are using Bayesian optimization
-    'metric': {
-      'name': 'val_loss',
-      'goal': 'minimize'   # You might want to change the metric and goal as per your requirement
-    },
-    'parameters': {
-        'learning_rate': {
-            'distribution': 'log_uniform_values',
-            'min': 0.000001,
-            'max': 0.1
-        },
-        'window_size': {
-            'value': 1000
-        },
-        'embedding_size': {
-            'distribution': 'int_uniform',
-            'min': 2,
-            'max': 5
-        },
-        'batch_size': {
-            'value': 8
-        },
-        'num_workers': {
-            'value': 16
-        },
-        'num_heads': {
-            'values': [1, 2, 4, 8]
-        },
-        'num_layers': {
-            'distribution': 'int_uniform',
-            'min': 2,
-            'max': 5
-        },
-        'dropout': {
-            'distribution': 'uniform',
-            'min': 0.0,
-            'max': 0.5
-        }
+swep_config = {
+    "method": "bayes",
+    "metric": {"goal": "minimize", "name": "val_loss"},
+    "parameters": {
+        "nhead": {"values": [2, 4, 13, 26, 52]},
+        "num_layers": {"values": [2, 4, 6, 8, 10]},
+        "latent_dim": {"values": [32, 64, 128, 256]},
+        "dropout": {"values": [0.1, 0.2, 0.3, 0.4]},
+        "window_dim": {"values": [500, 1000, 2000, 4000, 10000]},
     }
 }
 
-if __name__=="__main__":
-    sweep_id = wandb.sweep(sweep_config, project="JAAEC_Fiberphotometry")
-    print(sweep_id)
-    wandb.agent(sweep_id, function=train, count=100)
+wandb.sweep(swep_config, project='fiber-tracking', entity='bugsie')
+wandb.agent('sweep_id', function=train)

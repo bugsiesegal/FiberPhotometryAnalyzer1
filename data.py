@@ -1,151 +1,139 @@
-import lightning as pl
-import glob
+import os
 
-import numpy as np
-import pandas as pd
-import tdt
 import torch
-from torch.utils.data import Dataset, DataLoader
+from lightning.pytorch import LightningDataModule
+from torch.utils.data import DataLoader, Dataset
+import torch
+import torch.nn.functional as F
+from config import Config
+from glob import glob
+import pandas as pd
 
 
-class TDTFiberPhotometryDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str, window_size, batch_size: int = 32, num_workers: int = 0):
-        super().__init__()
-        self.data_dir = data_dir
-        self.batch_size = batch_size
+class FiberTrackingDataset(Dataset):
+    def __init__(self, data, window_size):
+        self.data = data
         self.window_size = window_size
-        self.num_workers = num_workers
+
+        len_data = 0
+
+        for fiber, tracking in self.data:
+            len_data += fiber.shape[0] - window_size - 1
+
+        self.len_data = len_data
+
+    def __len__(self):
+        return self.len_data
+
+    def __getitem__(self, idx):
+        for fiber, tracking in self.data:
+            if idx < fiber.shape[0] - self.window_size - 1:
+                tracking_idx_fiber = torch.arange(0, tracking.shape[0], step=tracking.shape[0] / fiber.shape[0])
+                tracking_idx_fiber_subset = tracking_idx_fiber[idx:idx + self.window_size]
+                tracking_idx_fiber_subset = tracking_idx_fiber_subset.round().long()
+                tracking_idx_fiber_subset = tracking_idx_fiber_subset.clamp(0, tracking.shape[0] - 1)
+                return torch.hstack((fiber[idx:idx + self.window_size].unsqueeze(1), tracking[tracking_idx_fiber_subset]))
+
+            else:
+                idx -= fiber.shape[0]
+                if idx < 0:
+                    idx = 0
+
+
+class FiberTrackingDataModule(LightningDataModule):
+    def __init__(self, config: Config):
+        super(FiberTrackingDataModule, self).__init__()
+        self.config = config
+
+        self.data_dir = config.data_dir
+        self.batch_size = config.batch_size
+        self.num_workers = config.num_workers
+
+        self.fiber_tracking_pairs = []
+        self.data = []
+
+    def load_fiber(self, fiber_path):
+        # Load fiber data from csv
+        fiber_df = pd.read_csv(fiber_path)
+        # Get fiber channel and convert to tensor
+        fiber_channel = torch.tensor(fiber_df[self.config.fiber_channel_name].to_numpy())
+        # Get control channel
+        control_channel = torch.tensor(fiber_df[self.config.control_channel_name].to_numpy())
+        # Subtract control channel from fiber channel
+        fiber_channel -= control_channel
+        # Normalize fiber channel if needed
+        if self.config.fiber_normalize:
+            fiber_channel = (fiber_channel - fiber_channel.mean()) / fiber_channel.std()
+        # Convert to float16 for memory efficiency
+        fiber_channel = fiber_channel.to(torch.float32)
+        return fiber_channel
+
+    def load_tracking(self, tracking_path):
+        # Load tracking data from csv
+        tracking_df = pd.read_csv(tracking_path)
+        # Get column names
+        column_names = tracking_df.columns
+        # Get columns with x, y, z
+        x_columns = [column for column in column_names if '_x' in column]
+        y_columns = [column for column in column_names if '_y' in column]
+        z_columns = [column for column in column_names if '_z' in column]
+        # Convert to tensor
+        x = torch.tensor(tracking_df[x_columns].to_numpy())
+        y = torch.tensor(tracking_df[y_columns].to_numpy())
+        z = torch.tensor(tracking_df[z_columns].to_numpy())
+        # Concatenate x, y, z
+        tracking = torch.cat([x, y, z], dim=1)
+        # Normalize tracking data if needed
+        if self.config.tracking_normalize:
+            tracking = (tracking - tracking.mean()) / tracking.std()
+        # Convert to float16 for memory efficiency
+        tracking = tracking.to(torch.float32)
+        return tracking
+
+    def prepare_data(self) -> None:
+        # Get fiber and tracking paths
+        fiber_paths = glob(os.path.join(self.data_dir, '**/Fiber/*.csv'), recursive=True)
+        tracking_paths = glob(os.path.join(self.data_dir, '**/Tracking/*.csv'), recursive=True)
+        # Check if length of fiber and tracking paths are the same
+        assert len(fiber_paths) == len(tracking_paths)
+        # Find tracking path which includes fiber paths base name
+        for fiber_path in fiber_paths:
+            fiber_base_name = fiber_path.split('/')[-1].split('.')[0]
+            tracking_path = [tracking_path for tracking_path in tracking_paths if fiber_base_name in tracking_path][0]
+            self.fiber_tracking_pairs.append((fiber_path, tracking_path))
+
+        # Load data
+        self.data = [
+            (self.load_fiber(fiber_path), self.load_tracking(tracking_path))
+            for fiber_path, tracking_path in self.fiber_tracking_pairs
+        ]
 
     def setup(self, stage=None):
-        if stage == "fit":
-            self.train_blocks = glob.glob(self.data_dir + "/train/*")
-            self.val_blocks = glob.glob(self.data_dir + "/val/*")
-
-            self.train_data = []
-            self.val_data = []
-
-            for block_path in self.train_blocks:
-                block = tdt.read_block(block_path)
-
-                data = block["streams"]["LMag"]["data"][0]
-
-                data = (data - data.mean()) / data.std()
-
-                self.train_data.append(
-                    torch.tensor(data).unfold(0, self.window_size, 100).unsqueeze(2))
-
-            for block_path in self.val_blocks:
-                block = tdt.read_block(block_path)
-
-                data = block["streams"]["LMag"]["data"][0]
-
-                data = (data - data.mean()) / data.std()
-
-                self.val_data.append(
-                    torch.tensor(data).unfold(0, self.window_size, 100).unsqueeze(2))
-
-            self.train_data = np.concatenate(self.train_data, axis=0)
-            self.val_data = np.concatenate(self.val_data, axis=0)
-
-            self.train_data = torch.tensor(self.train_data)
-            self.val_data = torch.tensor(self.val_data)
-        elif stage == "test":
-            self.test_blocks = glob.glob(self.data_dir + "/test/*")
-
-            self.test_data = []
-
-            for block_path in self.test_blocks:
-                block = tdt.read_block(block_path)
-
-                data = block["streams"]["LMag"]["data"][0]
-
-                data = (data - data.mean()) / data.std()
-
-                self.test_data.append(
-                    torch.tensor(data).unfold(0, self.window_size, 100).unsqueeze(2))
-
-            self.test_data = np.concatenate(self.test_data, axis=0)
-
-            self.test_data = torch.tensor(self.test_data)
+        # Split data into train, val, test
+        train_size = int(0.7 * len(self.data))
+        val_size = int(0.15 * len(self.data))
+        test_size = len(self.data) - train_size - val_size
+        self.train_data, self.val_data, self.test_data = torch.utils.data.random_split(
+            self.data, [train_size, val_size, test_size]
+        )
 
     def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=self.num_workers)
+        return DataLoader(
+            FiberTrackingDataset(self.train_data, self.config.window_dim),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=self.num_workers)
+        return DataLoader(
+            FiberTrackingDataset(self.val_data, self.config.window_dim),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=self.num_workers)
-
-
-class BehaviorDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str, window_size, batch_size: int = 32, num_workers: int = 0):
-        super().__init__()
-        self.data_dir = data_dir
-        self.batch_size = batch_size
-        self.window_size = window_size
-        self.num_workers = num_workers
-
-    def setup(self, stage=None):
-        if stage == "fit":
-            self.train_data = []
-            self.val_data = []
-
-            self.train_paths = glob.glob(self.data_dir + "/train/*")
-            self.val_paths = glob.glob(self.data_dir + "/val/*")
-
-            for path in self.train_paths:
-                data = pd.read_csv(path,
-                                   header=1).drop("bodyparts", axis=1)
-                data = data.loc[:, ~(data == 'likelihood').any()].drop(0).astype(np.float32).to_numpy()
-
-                data = (data - data.mean()) / data.std()
-
-                self.train_data.append(torch.tensor(data).unfold(0, self.window_size, 100).reshape(-1,
-                                                                                                   self.window_size,
-                                                                                                   8))
-
-            for path in self.val_paths:
-                data = pd.read_csv(path,
-                                   header=1).drop("bodyparts", axis=1)
-                data = data.loc[:, ~(data == 'likelihood').any()].drop(0).astype(np.float32).to_numpy()
-
-                data = (data - data.mean()) / data.std()
-
-                self.val_data.append(torch.tensor(data).unfold(0, self.window_size, 100).reshape(-1,
-                                                                                                 self.window_size,
-                                                                                                 8))
-
-            self.train_data = np.concatenate(self.train_data, axis=0)
-            self.val_data = np.concatenate(self.val_data, axis=0)
-
-            self.train_data = torch.tensor(self.train_data)
-            self.val_data = torch.tensor(self.val_data)
-        elif stage == "test":
-            self.test_data = []
-
-            self.test_paths = glob.glob(self.data_dir + "/test/*")
-
-            for path in self.test_paths:
-                data = pd.read_csv(path,
-                                   header=1).drop("bodyparts", axis=1)
-                data = data.loc[:, ~(data == 'likelihood').any()].drop(0).astype(np.float32).to_numpy()
-
-                data = (data - data.mean()) / data.std()
-
-                self.test_data.append(torch.tensor(data).unfold(0, self.window_size, 100).reshape(-1,
-                                                                                                  self.window_size,
-                                                                                                  8))
-
-            self.test_data = np.concatenate(self.test_data, axis=0)
-
-            self.test_data = torch.tensor(self.test_data)
-
-    def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.batch_size, num_workers=self.num_workers)
-
-    def val_dataloader(self):
-        return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=self.num_workers)
-
-    def test_dataloader(self):
-        return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=self.num_workers)
+        return DataLoader(
+            FiberTrackingDataset(self.test_data, self.config.window_dim),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers
+        )

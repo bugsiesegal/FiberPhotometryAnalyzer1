@@ -1,61 +1,58 @@
-import math
-import os
-
-from lightning.pytorch.callbacks import ModelPruning, LearningRateFinder
-
-import data
-import torch
+from model import AutoencoderModule
+from lightning.pytorch import Trainer
+from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateFinder, BatchSizeFinder
+from config import Config
+from data import FiberTrackingDataModule
 import wandb
-from JAAEC import AmazingAutoEncoder
-import lightning as pl
-from pytorch_lightning.loggers import WandbLogger
 
 
 def train():
-    wandb.init(project="JAAEC_Fiberphotometry")
+    wandb.init(project='fiber-tracking')
+    # Create a config object
+    config = Config()
+    config.data_dir = '/workspace/data/December 2023/'
+    config.batch_size = 16
+    try:
+        config.nhead = wandb.config.nhead
+        config.num_layers = wandb.config.num_layers
+        config.latent_dim = wandb.config.latent_dim
+        config.dropout = wandb.config.dropout
+        config.window_dim = wandb.config.window_dim
+    except AttributeError:
+        config.nhead = 26
+        config.num_layers = 6
+        config.latent_dim = 16
+        config.dropout = 0.2
+        config.window_dim = 1000
+    config.num_workers = 4
 
-    # Hyperparameters
-    learning_rate = wandb.config.learning_rate
-    window_size = wandb.config.window_size
-    embedding_size = 2**wandb.config.embedding_size
-    batch_size = wandb.config.batch_size
-    num_workers = wandb.config.num_workers
-    num_heads = wandb.config.num_heads
-    num_layers = wandb.config.num_layers
-    dropout = wandb.config.dropout
+    # Create a model
+    model = AutoencoderModule(config)
 
-    datamodule = data.TDTFiberPhotometryDataModule("data",
-                                                   window_size, batch_size=batch_size, num_workers=num_workers)
+    # Create a data module
+    data_module = FiberTrackingDataModule(config)
 
-    autoencoder = AmazingAutoEncoder((1, window_size, 1), (1, embedding_size),
-                                     learning_rate=learning_rate, num_layers=num_layers,
-                                     num_heads=num_heads, dropout=dropout)
+    # Create a trainer
+    trainer = Trainer(
+        logger=[WandbLogger(project='fiber-tracking', log_model="all")],
+        callbacks=[
+            ModelCheckpoint(monitor='val_loss'),
+            BatchSizeFinder()
+        ],
+        max_time={'hours': 10},
+        precision="16-mixed",
+    )
 
-    torch.set_float32_matmul_precision('medium')
+    # Train the model
+    trainer.fit(model, data_module)
 
-    wandb_logger = WandbLogger(project="JAAEC_Fiberphotometry", log_model=True,
-                               save_dir=os.path.join(os.getcwd(), "wandb_logs"))
+    # Save the model
+    trainer.save_checkpoint('model.ckpt')
 
-    trainer = pl.Trainer(logger=wandb_logger,
-                         precision='16-mixed',
-                         max_time="00:20:00:00",
-                         benchmark=True,
-                         callbacks=[ModelPruning(pruning_fn="l1_unstructured"), LearningRateFinder(),],
-                         gradient_clip_val=0.5,
-                         )
-
-    trainer.fit(autoencoder, datamodule=datamodule)
+    # Test the model
+    trainer.test(model, data_module)
 
 
-if __name__ == "__main__":
-    wandb.init(project="JAAEC_Fiberphotometry")
-    wandb.config.learning_rate = 1e-6
-    wandb.config.window_size = 1000
-    wandb.config.embedding_size = 5
-    wandb.config.batch_size = 64
-    wandb.config.num_workers = 16
-    wandb.config.num_heads = 8
-    wandb.config.num_layers = 3
-    wandb.config.dropout = 0.1
-
+if __name__ == '__main__':
     train()
