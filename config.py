@@ -13,15 +13,18 @@ class Config:
     activation: str = 'relu'
     latent_dim: int = 128
     learning_rate: float = 1e-3
+    lr_factor: float = 0.1
+    lr_patience: int = 5
 
     # Data
     data_dir: str = field(default_factory=str)
     batch_size: int = 32
     num_workers: int = 4
+    use_fiber: bool = True
+    use_tracking: bool = True
 
     # Fiber
     fiber_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-2)'
     control_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-3)'
-    fiber_normalize: bool = True
-    tracking_normalize: bool = True
+    normalize: bool = True
     

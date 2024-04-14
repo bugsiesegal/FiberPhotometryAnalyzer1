@@ -1,6 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import wandb
 
 from lightning.pytorch import LightningModule
 
@@ -28,14 +31,14 @@ class Autoencoder(nn.Module):
                 dim_feedforward=self.dim_feedforward,
                 dropout=self.dropout,
                 activation=self.activation,
-                batch_first=True
+                batch_first=True,
             ),
             num_layers=self.num_layers,
             norm=nn.LayerNorm(self.d_model)
         )
-        self.encoder_fc = nn.Linear(self.window_dim, self.latent_dim)
+        self.encoder_fc = nn.Linear(self.window_dim * self.d_model, self.latent_dim)
         # decoder
-        self.decoder_fc = nn.Linear(self.latent_dim, self.window_dim)
+        self.decoder_fc = nn.Linear(self.latent_dim, self.window_dim * self.d_model)
         self.decoder_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=self.d_model,
@@ -48,12 +51,15 @@ class Autoencoder(nn.Module):
             num_layers=self.num_layers,
             norm=nn.LayerNorm(self.d_model)
         )
+        self.decoder_final = nn.Linear(self.d_model, self.d_model)
 
     def forward(self, x):
         x = self.encoder_transformer(x).swapaxes(1, 2)
-        x = self.encoder_fc(x)
-        x = self.decoder_fc(x).swapaxes(1, 2)
+        x = self.encoder_fc(x.reshape(-1, self.window_dim * self.d_model))
+        x = self.decoder_fc(x).reshape(-1, self.window_dim, self.d_model)
         x = self.decoder_transformer(x)
+        x = self.decoder_final(x)
+        x = F.tanh(x)
         return x
 
 
@@ -76,10 +82,18 @@ class AutoencoderModule(LightningModule):
         return loss
 
     def _log_prediction(self, batch, y_hat):
-        self.logger.experiment.log({'input': batch[0]})
-        self.logger.experiment.log({'output': y_hat[0]})
+        y_hat = torch.nan_to_num(y_hat, nan=0.0)
+        # Plot input and output using matplotlib
+        fig, ax = plt.subplots(2, 1)
+        ax[0].plot(batch[0, :, 0].detach().cpu().numpy(), label='Input')
+        ax[1].plot(y_hat[0, :, 0].detach().cpu().numpy(), label='Output')
+        # Log using wandb
+        self.logger.experiment.log({'prediction': wandb.Plotly(plt)})
 
     def training_step(self, batch, batch_idx):
+        if self.config.normalize:
+            batch = (batch - batch.mean(dim=1)) / batch.std(dim=1)
+
         loss = self._common_step(batch, batch_idx)
         self.log('train_loss', loss)
         return loss
@@ -87,7 +101,8 @@ class AutoencoderModule(LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = self._common_step(batch, batch_idx)
         self.log('val_loss', loss)
-        self._log_prediction(batch, self.model(batch))
+        if batch_idx == 0:
+            self._log_prediction(batch, self.model(batch))
         return loss
 
     def test_step(self, batch, batch_idx):
@@ -96,4 +111,16 @@ class AutoencoderModule(LightningModule):
         return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=self.config.lr_factor, patience=self.config.lr_patience, verbose=True
+        )
+        return {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': lr_scheduler,
+                'monitor': 'train_loss',
+                'frequency': 1000,
+                'interval': 'step',
+            }
+        }

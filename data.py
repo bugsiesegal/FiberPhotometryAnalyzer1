@@ -11,7 +11,7 @@ import pandas as pd
 
 
 class FiberTrackingDataset(Dataset):
-    def __init__(self, data, window_size):
+    def __init__(self, data, window_size, normalize_fiber=True, normalize_tracking=True, use_fiber=True, use_tracking=True):
         self.data = data
         self.window_size = window_size
 
@@ -21,6 +21,12 @@ class FiberTrackingDataset(Dataset):
             len_data += fiber.shape[0] - window_size - 1
 
         self.len_data = len_data
+
+        self.normalize_fiber = normalize_fiber
+        self.normalize_tracking = normalize_tracking
+
+        self.use_fiber = use_fiber
+        self.use_tracking = use_tracking
 
     def __len__(self):
         return self.len_data
@@ -32,7 +38,14 @@ class FiberTrackingDataset(Dataset):
                 tracking_idx_fiber_subset = tracking_idx_fiber[idx:idx + self.window_size]
                 tracking_idx_fiber_subset = tracking_idx_fiber_subset.round().long()
                 tracking_idx_fiber_subset = tracking_idx_fiber_subset.clamp(0, tracking.shape[0] - 1)
-                return torch.hstack((fiber[idx:idx + self.window_size].unsqueeze(1), tracking[tracking_idx_fiber_subset]))
+                fiber = fiber[idx:idx + self.window_size].unsqueeze(1)
+                tracking = tracking[tracking_idx_fiber_subset]
+                if self.use_fiber and self.use_tracking:
+                    return torch.hstack((fiber, tracking))
+                elif self.use_fiber:
+                    return fiber
+                elif self.use_tracking:
+                    return tracking
 
             else:
                 idx -= fiber.shape[0]
@@ -61,9 +74,6 @@ class FiberTrackingDataModule(LightningDataModule):
         control_channel = torch.tensor(fiber_df[self.config.control_channel_name].to_numpy())
         # Subtract control channel from fiber channel
         fiber_channel -= control_channel
-        # Normalize fiber channel if needed
-        if self.config.fiber_normalize:
-            fiber_channel = (fiber_channel - fiber_channel.mean()) / fiber_channel.std()
         # Convert to float16 for memory efficiency
         fiber_channel = fiber_channel.to(torch.float32)
         return fiber_channel
@@ -83,9 +93,6 @@ class FiberTrackingDataModule(LightningDataModule):
         z = torch.tensor(tracking_df[z_columns].to_numpy())
         # Concatenate x, y, z
         tracking = torch.cat([x, y, z], dim=1)
-        # Normalize tracking data if needed
-        if self.config.tracking_normalize:
-            tracking = (tracking - tracking.mean()) / tracking.std()
         # Convert to float16 for memory efficiency
         tracking = tracking.to(torch.float32)
         return tracking
@@ -119,21 +126,24 @@ class FiberTrackingDataModule(LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(
-            FiberTrackingDataset(self.train_data, self.config.window_dim),
+            FiberTrackingDataset(self.train_data, self.config.window_dim, self.config.fiber_normalize, self.config.tracking_normalize, self.config.use_fiber, self.config.use_tracking),
             batch_size=self.batch_size,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            shuffle=True
         )
 
     def val_dataloader(self):
         return DataLoader(
-            FiberTrackingDataset(self.val_data, self.config.window_dim),
+            FiberTrackingDataset(self.val_data, self.config.window_dim, self.config.fiber_normalize, self.config.tracking_normalize, self.config.use_fiber, self.config.use_tracking),
             batch_size=self.batch_size,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            shuffle=False
         )
 
     def test_dataloader(self):
         return DataLoader(
-            FiberTrackingDataset(self.test_data, self.config.window_dim),
+            FiberTrackingDataset(self.test_data, self.config.window_dim, self.config.fiber_normalize, self.config.tracking_normalize),
             batch_size=self.batch_size,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            shuffle=False
         )
