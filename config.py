@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 @dataclass
 class Config:
     # Model
-    d_model: int = 52
+    d_model: int = 64
     window_dim: int = 1000
     nhead: int = 8
     dim_feedforward: int = 2048
@@ -15,6 +15,8 @@ class Config:
     learning_rate: float = 1e-3
     lr_factor: float = 0.1
     lr_patience: int = 5
+    input_features: int = 52
+    use_fft: bool = False
 
     # Data
     data_dir: str = field(default_factory=str)

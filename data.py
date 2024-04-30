@@ -11,7 +11,7 @@ import pandas as pd
 
 
 class FiberTrackingDataset(Dataset):
-    def __init__(self, data, window_size, normalize_fiber=True, normalize_tracking=True, use_fiber=True, use_tracking=True):
+    def __init__(self, data, window_size, use_fiber=True, use_tracking=True, normalize=True):
         self.data = data
         self.window_size = window_size
 
@@ -22,11 +22,9 @@ class FiberTrackingDataset(Dataset):
 
         self.len_data = len_data
 
-        self.normalize_fiber = normalize_fiber
-        self.normalize_tracking = normalize_tracking
-
         self.use_fiber = use_fiber
         self.use_tracking = use_tracking
+        self.normalize = normalize
 
     def __len__(self):
         return self.len_data
@@ -40,6 +38,15 @@ class FiberTrackingDataset(Dataset):
                 tracking_idx_fiber_subset = tracking_idx_fiber_subset.clamp(0, tracking.shape[0] - 1)
                 fiber = fiber[idx:idx + self.window_size].unsqueeze(1)
                 tracking = tracking[tracking_idx_fiber_subset]
+                if self.normalize:
+                    # Normalize between 0 and 1
+                    fibermin = torch.min(fiber, dim=0).values
+                    fibermax = torch.max(fiber, dim=0).values
+                    fiber = (fiber - fibermin) / (fibermax - fibermin)
+                    trackingmin = torch.min(tracking, dim=0).values
+                    trackingmax = torch.max(tracking, dim=0).values
+                    tracking = (tracking - trackingmin) / (trackingmax - trackingmin)
+
                 if self.use_fiber and self.use_tracking:
                     return torch.hstack((fiber, tracking))
                 elif self.use_fiber:
@@ -126,7 +133,7 @@ class FiberTrackingDataModule(LightningDataModule):
 
     def train_dataloader(self):
         return DataLoader(
-            FiberTrackingDataset(self.train_data, self.config.window_dim, self.config.fiber_normalize, self.config.tracking_normalize, self.config.use_fiber, self.config.use_tracking),
+            FiberTrackingDataset(self.train_data, self.config.window_dim, self.config.use_fiber, self.config.use_tracking, self.config.normalize),
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=True
@@ -134,7 +141,7 @@ class FiberTrackingDataModule(LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(
-            FiberTrackingDataset(self.val_data, self.config.window_dim, self.config.fiber_normalize, self.config.tracking_normalize, self.config.use_fiber, self.config.use_tracking),
+            FiberTrackingDataset(self.val_data, self.config.window_dim, self.config.use_fiber, self.config.use_tracking, self.config.normalize),
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False
@@ -142,7 +149,7 @@ class FiberTrackingDataModule(LightningDataModule):
 
     def test_dataloader(self):
         return DataLoader(
-            FiberTrackingDataset(self.test_data, self.config.window_dim, self.config.fiber_normalize, self.config.tracking_normalize),
+            FiberTrackingDataset(self.test_data, self.config.window_dim, self.config.use_fiber, self.config.use_tracking, self.config.normalize),
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False
