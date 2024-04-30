@@ -1,9 +1,8 @@
 from dataclasses import dataclass, field
 
-
 @dataclass
 class Config:
-    # Model
+    # Basic model configuration
     d_model: int = 64
     window_dim: int = 1000
     nhead: int = 8
@@ -12,21 +11,31 @@ class Config:
     dropout: float = 0.1
     activation: str = 'relu'
     latent_dim: int = 128
+
+    # Learning parameters
     learning_rate: float = 1e-3
     lr_factor: float = 0.1
     lr_patience: int = 5
+
+    # Scheduling parameters
+    monitor: str = 'val_loss'
+    scheduler_frequency: int = 1
+    scheduler_interval: str = 'epoch'
+
+    # Input configuration
     input_features: int = 52
     use_fft: bool = False
 
-    # Data
+    # Data handling
     data_dir: str = field(default_factory=str)
     batch_size: int = 32
     num_workers: int = 4
+
+    # Feature toggles
     use_fiber: bool = True
     use_tracking: bool = True
 
-    # Fiber
+    # Fiber specific configuration
     fiber_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-2)'
     control_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-3)'
     normalize: bool = True
-    

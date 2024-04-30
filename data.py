@@ -11,17 +11,19 @@ import pandas as pd
 
 
 class FiberTrackingDataset(Dataset):
+    """Dataset for fiber and tracking data."""
     def __init__(self, data, window_size, use_fiber=True, use_tracking=True, normalize=True):
+        """
+        Initialize the dataset with data configurations.
+        :param data: List of tuples (fiber data, tracking data)
+        :param window_size: Size of the data window
+        :param use_fiber: Boolean, whether to include fiber data
+        :param use_tracking: Boolean, whether to include tracking data
+        :param normalize: Boolean, whether to normalize data
+        """
         self.data = data
         self.window_size = window_size
-
-        len_data = 0
-
-        for fiber, tracking in self.data:
-            len_data += fiber.shape[0] - window_size - 1
-
-        self.len_data = len_data
-
+        self.len_data = sum(fiber.shape[0] - window_size - 1 for fiber, _ in self.data)
         self.use_fiber = use_fiber
         self.use_tracking = use_tracking
         self.normalize = normalize
@@ -30,38 +32,50 @@ class FiberTrackingDataset(Dataset):
         return self.len_data
 
     def __getitem__(self, idx):
+        """Returns a data point and its label."""
         for fiber, tracking in self.data:
             if idx < fiber.shape[0] - self.window_size - 1:
-                tracking_idx_fiber = torch.arange(0, tracking.shape[0], step=tracking.shape[0] / fiber.shape[0])
-                tracking_idx_fiber_subset = tracking_idx_fiber[idx:idx + self.window_size]
-                tracking_idx_fiber_subset = tracking_idx_fiber_subset.round().long()
-                tracking_idx_fiber_subset = tracking_idx_fiber_subset.clamp(0, tracking.shape[0] - 1)
-                fiber = fiber[idx:idx + self.window_size].unsqueeze(1)
-                tracking = tracking[tracking_idx_fiber_subset]
-                if self.normalize:
-                    # Normalize between 0 and 1
-                    fibermin = torch.min(fiber, dim=0).values
-                    fibermax = torch.max(fiber, dim=0).values
-                    fiber = (fiber - fibermin) / (fibermax - fibermin)
-                    trackingmin = torch.min(tracking, dim=0).values
-                    trackingmax = torch.max(tracking, dim=0).values
-                    tracking = (tracking - trackingmin) / (trackingmax - trackingmin)
+                return self._get_window(fiber, tracking, idx)
+            idx = max(0, idx - fiber.shape[0])
 
-                if self.use_fiber and self.use_tracking:
-                    return torch.hstack((fiber, tracking))
-                elif self.use_fiber:
-                    return fiber
-                elif self.use_tracking:
-                    return tracking
+    def _get_window(self, fiber, tracking, idx):
+        """Extracts a window of data from the dataset."""
+        window_end_idx = idx + self.window_size
+        fiber_window = fiber[idx:window_end_idx].unsqueeze(1)
+        tracking_window = self._get_tracking_window(tracking, fiber, idx)
 
-            else:
-                idx -= fiber.shape[0]
-                if idx < 0:
-                    idx = 0
+        if self.normalize:
+            fiber_window = self._normalize(fiber_window)
+            tracking_window = self._normalize(tracking_window)
+
+        if self.use_fiber and self.use_tracking:
+            return torch.hstack((fiber_window, tracking_window))
+        elif self.use_fiber:
+            return fiber_window
+        elif self.use_tracking:
+            return tracking_window
+
+    def _get_tracking_window(self, tracking, fiber, idx):
+        """Maps fiber indices to tracking indices and extracts tracking data."""
+        tracking_indices = torch.linspace(0, tracking.shape[0], fiber.shape[0])
+        subset_indices = tracking_indices[idx:idx + self.window_size].round().long().clamp(0, tracking.shape[0] - 1)
+        return tracking[subset_indices]
+
+    def _normalize(self, data):
+        """Normalizes the data to the range [0, 1]."""
+        min_val, max_val = data.min(dim=0).values, data.max(dim=0).values
+        return (data - min_val) / (max_val - min_val)
 
 
 class FiberTrackingDataModule(LightningDataModule):
+    """
+    A data module for loading and preparing fiber tracking data using PyTorch Lightning.
+    """
     def __init__(self, config: Config):
+        """
+        Initialize the data module with configuration.
+        :param config: Configuration object
+        """
         super(FiberTrackingDataModule, self).__init__()
         self.config = config
 
@@ -73,6 +87,7 @@ class FiberTrackingDataModule(LightningDataModule):
         self.data = []
 
     def load_fiber(self, fiber_path):
+        """Load and process fiber data from a CSV file."""
         # Load fiber data from csv
         fiber_df = pd.read_csv(fiber_path)
         # Get fiber channel and convert to tensor
@@ -86,6 +101,7 @@ class FiberTrackingDataModule(LightningDataModule):
         return fiber_channel
 
     def load_tracking(self, tracking_path):
+        """Load and process tracking data from a CSV file."""
         # Load tracking data from csv
         tracking_df = pd.read_csv(tracking_path)
         # Get column names
@@ -105,6 +121,7 @@ class FiberTrackingDataModule(LightningDataModule):
         return tracking
 
     def prepare_data(self) -> None:
+        """Prepare data by loading paths and asserting correct matches."""
         # Get fiber and tracking paths
         fiber_paths = glob(os.path.join(self.data_dir, '**/Fiber/*.csv'), recursive=True)
         tracking_paths = glob(os.path.join(self.data_dir, '**/Tracking/*.csv'), recursive=True)
@@ -123,6 +140,7 @@ class FiberTrackingDataModule(LightningDataModule):
         ]
 
     def setup(self, stage=None):
+        """Split data into train, val, test sets."""
         # Split data into train, val, test
         train_size = int(0.7 * len(self.data))
         val_size = int(0.15 * len(self.data))

@@ -14,7 +14,6 @@ from config import Config
 
 
 class PositionalEncoding(nn.Module):
-
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
@@ -169,8 +168,8 @@ class AutoencoderModule(LightningModule):
             'optimizer': optimizer,
             'lr_scheduler': {
                 'scheduler': scheduler,
-                'monitor': 'train_loss',
-                'frequency': 100,
-                'interval': 'step',
+                'monitor': self.config.monitor,
+                'frequency': self.config.scheduler_frequency,
+                'interval': self.config.scheduler_interval,
             }
         }
