@@ -16,6 +16,7 @@ from config import Config
 from models.base_model import BaseAutoencoder
 from models.fft_transformer_model import FFTTransformerAutoencoder_1
 from models.transformer_model_v1 import TransformerAutoencoder_1
+from models.transformer_model_v2 import TransformerAutoencoder_2
 
 
 class BaseAutoencoderModule(LightningModule, ABC):
@@ -92,6 +93,34 @@ class TransformerAutoencoderModule_1(BaseAutoencoderModule):
         """
         super(TransformerAutoencoderModule_1, self).__init__(config)
         self.model = TransformerAutoencoder_1(config)
+        self.loss = nn.MSELoss()
+
+    def forward(self, x):
+        """Forward pass through the model."""
+        return self.model(x)
+
+    def _common_step(self, batch, batch_idx):
+        """
+        Common step for training, validation, and testing.
+        :param batch: Batch of data
+        :param batch_idx: Batch index
+        :return: Loss
+        """
+        x = batch
+        x_hat = self(x)
+        loss = self.loss(x, x_hat)
+        return loss
+
+
+class TransformerAutoencoderModule_2(BaseAutoencoderModule):
+    """A module for a transformer autoencoder with cut off for compression."""
+    def __init__(self, config: Config):
+        """
+        Initializes the transformer autoencoder module.
+        :param config: The configuration object
+        """
+        super(TransformerAutoencoderModule_2, self).__init__(config)
+        self.model = TransformerAutoencoder_2(config)
         self.loss = nn.MSELoss()
 
     def forward(self, x):

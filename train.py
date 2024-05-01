@@ -13,7 +13,8 @@ import click
 @click.command()
 @click.option('--config', '-c', default='config.yaml', help='Path to the configuration file.')
 @click.option('--wandb_enabled', '-w', default=False, is_flag=True, help='Enable Weights & Biases logging.')
-def main(config, wandb_enabled):
+@click.option('--debug_run', '-d', default=False, is_flag=True, help='Run the model in debug mode.')
+def main(config, wandb_enabled, debug_run):
     # Load the configuration
     if config.endswith('.json'):
         config = Config.from_json(config)
@@ -21,10 +22,6 @@ def main(config, wandb_enabled):
         config = Config.from_yaml(config)
     elif config.endswith('.py'):
         config = Config.from_py(config)
-
-    # Initialize Weights & Biases
-    if wandb_enabled:
-        wandb.init(project='fiber-tracking', config=config)
 
     # Initialize the data module
     data_module = FiberTrackingDataModule(config)
@@ -34,14 +31,16 @@ def main(config, wandb_enabled):
         model = TransformerAutoencoderModule_1(config)
     elif config.model == 'fft_transformer_v1':
         model = FFTAutoencoderModule_V1(config)
+    elif config.model == 'transformer_v2':
+        model = TransformerAutoencoderModule_2(config)
     else:
         raise ValueError(f'Invalid model: {config.model}')
 
     # Initialize the trainer
     trainer = Trainer(
-        logger=WandbLogger(project='fiber-tracking', config=config) if wandb_enabled else None,
+        logger=WandbLogger(project='fiber-tracking', config=config) if wandb_enabled and not debug_run else None,
         callbacks=[
-            ModelCheckpoint(monitor='val_loss', save_top_k=1),
+            ModelCheckpoint(monitor='val_loss', save_top_k=1) if not debug_run else None,
             EarlyStopping(monitor='val_loss', patience=config.lr_patience),
             LearningRateFinder(),
             BatchSizeFinder(),
@@ -49,7 +48,9 @@ def main(config, wandb_enabled):
         ],
         max_epochs=config.max_epochs,
         precision=config.precision,
-        max_time=config.max_time
+        max_time=config.max_time if not debug_run else '10m',
+        limit_train_batches=5 if debug_run else 1.0,
+        limit_val_batches=5 if debug_run else 1.0,
     )
 
     # Fit the model
