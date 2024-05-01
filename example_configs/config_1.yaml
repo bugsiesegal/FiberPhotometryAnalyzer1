@@ -1,0 +1,28 @@
+activation: relu
+batch_size: 32
+control_channel_name: Analog In. | Ch.1 AIn-1 - Dem (AOut-3)
+d_model: 64
+data_dir: ''
+dim_feedforward: 2048
+dropout: 0.1
+fiber_channel_name: Analog In. | Ch.1 AIn-1 - Dem (AOut-2)
+input_features: 52
+latent_dim: 64
+learning_rate: 0.001
+lr_factor: 0.1
+lr_patience: 5
+max_epochs: 100
+max_time: 1h
+model: transformer_v1
+monitor: val_loss
+nhead: 4
+normalize: true
+num_layers: 2
+num_workers: 4
+precision: '32'
+scheduler_frequency: 1
+scheduler_interval: epoch
+use_fft: false
+use_fiber: true
+use_tracking: true
+window_dim: 1024
