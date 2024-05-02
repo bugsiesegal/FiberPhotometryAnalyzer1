@@ -25,7 +25,7 @@ class BaseAutoencoderModule(LightningModule, ABC):
     def __init__(self, config: Config):
         super(BaseAutoencoderModule, self).__init__()
         self.config = config
-        self.model = BaseAutoencoder(config)
+        self.model = BaseAutoencoder
         self.loss = nn.MSELoss()
         self.learning_rate = config.learning_rate
 
@@ -45,7 +45,7 @@ class BaseAutoencoderModule(LightningModule, ABC):
         loss = self._common_step(batch, batch_idx)
         self.log('val_loss', loss)
 
-        if batch_idx == 0:
+        if batch_idx == 0 and self.logger is not None:
             table = wandb.Table(columns=[
                 "Num", "Error", "Plot"
             ])

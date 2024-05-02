@@ -1,6 +1,6 @@
 from models.lightning_models import *
 from lightning import Trainer
-from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateFinder, BatchSizeFinder, \
     ModelSummary
 from config import Config
@@ -38,9 +38,14 @@ def main(config, wandb_enabled, debug_run):
 
     # Initialize the trainer
     trainer = Trainer(
-        logger=WandbLogger(project='fiber-tracking', config=config) if wandb_enabled and not debug_run else None,
+        logger=[WandbLogger(project='fiber-tracking', config=config)] if wandb_enabled and not debug_run else [],
         callbacks=[
-            ModelCheckpoint(monitor='val_loss', save_top_k=1) if not debug_run else None,
+            ModelCheckpoint(monitor='val_loss', save_top_k=1),
+            EarlyStopping(monitor='val_loss', patience=config.lr_patience),
+            LearningRateFinder(),
+            BatchSizeFinder(),
+            ModelSummary(max_depth=3)
+        ] if not debug_run else [
             EarlyStopping(monitor='val_loss', patience=config.lr_patience),
             LearningRateFinder(),
             BatchSizeFinder(),
@@ -48,7 +53,7 @@ def main(config, wandb_enabled, debug_run):
         ],
         max_epochs=config.max_epochs,
         precision=config.precision,
-        max_time=config.max_time if not debug_run else '10m',
+        max_time=str(config.max_time) if not debug_run else '00:00:05:00',
         limit_train_batches=5 if debug_run else 1.0,
         limit_val_batches=5 if debug_run else 1.0,
     )
@@ -62,3 +67,7 @@ def main(config, wandb_enabled, debug_run):
     # Close Weights & Biases
     if wandb_enabled:
         wandb.finish()
+
+
+if __name__ == '__main__':
+    main()

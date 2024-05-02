@@ -62,7 +62,7 @@ class TransformerEncoder(BaseEncoder):
         """Forward pass through the transformer encoder. Returns the latent representation."""
         x = self.input_layer(x)
         x = self.positional_encoding(x.transpose(0, 1)).transpose(0, 1)
-        x = self.transformer_encoder(x).transpose(1, 2)
+        x = self.transformer_encoder(x).transpose(1, 2).reshape(x.shape[0], -1)
         x = self.encoder_compression(x)
         x = F.sigmoid(x)
         return x
@@ -93,7 +93,7 @@ class TransformerDecoder(BaseDecoder):
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""
-        x = self.decoder_compression(x).swapaxes(1, 2)
+        x = self.decoder_compression(x).reshape(x.shape[0], -1, self.config.d_model)
         x = self.transformer_decoder(x)
         x = self.output_layer(x)
         return x

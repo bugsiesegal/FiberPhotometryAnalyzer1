@@ -31,11 +31,9 @@ class BaseAutoencoder(nn.Module, ABC):
     def __init__(self, config: Config):
         super(BaseAutoencoder, self).__init__()
         self.config = config
-        self.encoder = BaseEncoder(config)
-        self.decoder = BaseDecoder(config)
+        self.encoder = BaseEncoder
+        self.decoder = BaseDecoder
 
     @abstractmethod
     def forward(self, x: Tensor):
-        self.encoder(x)
-        self.decoder(x)
-        return x
+        pass
