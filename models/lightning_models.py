@@ -46,22 +46,15 @@ class BaseAutoencoderModule(LightningModule, ABC):
         self.log('val_loss', loss)
 
         if batch_idx == 0 and self.logger is not None:
-            table = wandb.Table(columns=[
-                "Num", "Error", "Plot"
-            ])
             x = batch
             x_hat = self(x)
             for i in range(x.shape[2]):
                 plt.plot(x[0, :, i].cpu().detach().numpy(), label='Original')
                 plt.plot(x_hat[0, :, i].cpu().detach().numpy(), label='Reconstructed')
                 plt.legend()
-                table.add_row(
-                    i + 1,
-                    nn.functional.l1_loss(target=x, input=x_hat, reduction='none'),
-                    wandb.Image(plt.gcf())
-                )
+                loss = nn.functional.l1_loss(target=x, input=x_hat, reduction='none')
+                self.logger.experiment.log({f"Reconstruction Error {i}": loss, f"Plot {i}": plt}, step=self.global_step)
                 plt.clf()
-            self.logger.experiment.log({"Error Tables": table})
         return loss
 
     def test_step(self, batch, batch_idx):

@@ -66,8 +66,7 @@ class TransformerDecoder(BaseDecoder):
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""
-        x = x.unsqueeze(1).expand(-1, self.config.window_dim, -1)
-        x = self.decoder_compression(x).swapaxes(1, 2)
+        x = F.pad(x, (0, self.config.window_dim * self.config.d_model - self.config.latent_dim)).reshape(x.shape[0], -1, self.config.d_model)
         x = self.transformer_decoder(x)
         x = self.output_layer(x)
         return x
