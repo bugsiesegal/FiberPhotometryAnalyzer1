@@ -2,7 +2,7 @@ activation: relu
 batch_size: 32
 control_channel_name: Analog In. | Ch.1 AIn-1 - Dem (AOut-3)
 d_model: 64
-data_dir: '/workspace/FiberPhotometryAnalyzer/datafiles'
+data_dir: '/home/bugsie/PycharmProjects/FiberPhotometryAnalyzer/datafiles'
 dim_feedforward: 2048
 dropout: 0.1
 fiber_channel_name: Analog In. | Ch.1 AIn-1 - Dem (AOut-2)

@@ -114,6 +114,7 @@ class TransformerDecoder(BaseDecoder):
         x = self.decoder_compression(x).reshape(x.shape[0], -1, self.config.d_model)
         x = self.transformer_decoder(x)
         x = self.output_layer(x)
+        x = self.output_activation(x)
         return x
 
 

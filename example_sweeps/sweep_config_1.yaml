@@ -1,4 +1,4 @@
-program: train.py
+program: sweep.py
 name: sweep_config_1
 method: bayes
 metric:
@@ -12,6 +12,8 @@ parameters:
     - tanh
   batch_size:
     value: 32
+  data_dir:
+    value: '/home/bugsie/PycharmProjects/FiberPhotometryAnalyzer/datafiles'
   control_channel_name:
     value: Analog In. | Ch.1 AIn-1 - Dem (AOut-3)
   fiber_channel_name:
