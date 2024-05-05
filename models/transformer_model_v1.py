@@ -7,8 +7,22 @@ from config import Config
 from models.base_model import BaseEncoder, BaseDecoder, BaseAutoencoder
 
 
+def _get_activation(activation: str):
+    if activation == 'relu':
+        return nn.ReLU()
+    elif activation == 'sigmoid':
+        return nn.Sigmoid()
+    elif activation == 'tanh':
+        return nn.Tanh()
+    elif activation == 'linear':
+        return nn.Identity()
+    else:
+        raise ValueError(f"Activation function {activation} not supported.")
+
+
 class PositionalEncoding(nn.Module):
     """A positional encoding module."""
+
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
         """
         Initializes the positional encoding module.
@@ -37,6 +51,7 @@ class PositionalEncoding(nn.Module):
 
 class TransformerEncoder(BaseEncoder):
     """A transformer encoder module. Uses a linear layer for compression."""
+
     def __init__(self, config: Config):
         """
         Initializes the transformer encoder.
@@ -58,14 +73,7 @@ class TransformerEncoder(BaseEncoder):
         )
         self.encoder_compression = nn.Linear(config.window_dim * config.d_model, config.latent_dim)
 
-        if config.activation == 'relu':
-            self.output_activation = nn.ReLU()
-        elif config.activation == 'sigmoid':
-            self.output_activation = nn.Sigmoid()
-        elif config.activation == 'tanh':
-            self.output_activation = nn.Tanh()
-        else:
-            raise ValueError(f"Activation function {config.activation} not supported.")
+        self.output_activation = _get_activation(config.activation)
 
     def forward(self, x):
         """Forward pass through the transformer encoder. Returns the latent representation."""
@@ -79,6 +87,7 @@ class TransformerEncoder(BaseEncoder):
 
 class TransformerDecoder(BaseDecoder):
     """A transformer decoder module. Uses a linear layer for decompression."""
+
     def __init__(self, config: Config):
         """
         Initializes the transformer decoder.
@@ -100,14 +109,7 @@ class TransformerDecoder(BaseDecoder):
         )
         self.output_layer = nn.Linear(config.d_model, config.input_features)
 
-        if config.activation == 'relu':
-            self.output_activation = nn.ReLU()
-        elif config.activation == 'sigmoid':
-            self.output_activation = nn.Sigmoid()
-        elif config.activation == 'tanh':
-            self.output_activation = nn.Tanh()
-        else:
-            raise ValueError(f"Activation function {config.activation} not supported.")
+        self.output_activation = _get_activation(config.activation)
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""
@@ -120,6 +122,7 @@ class TransformerDecoder(BaseDecoder):
 
 class TransformerAutoencoder_1(BaseAutoencoder):
     """A transformer autoencoder module. Uses a transformer encoder and decoder."""
+
     def __init__(self, config: Config):
         """
         Initializes the transformer autoencoder.
