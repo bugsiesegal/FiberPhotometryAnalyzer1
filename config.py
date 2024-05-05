@@ -30,7 +30,6 @@ class Config:
 
     # Input configuration
     input_features: int = 52
-    use_fft: bool = False
 
     # Data handling
     data_dir: str = field(default_factory=str)
@@ -44,7 +43,7 @@ class Config:
     # Fiber specific configuration
     fiber_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-2)'
     control_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-3)'
-    normalize: bool = True
+    normalization: str = 'min-max'
 
     # Training configuration
     max_epochs: int = 100

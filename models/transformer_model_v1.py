@@ -51,12 +51,21 @@ class TransformerEncoder(BaseEncoder):
                 nhead=config.nhead,
                 dim_feedforward=config.dim_feedforward,
                 dropout=config.dropout,
-                activation=config.activation,
+                activation='relu',
                 batch_first=True
             ),
             num_layers=config.num_layers
         )
         self.encoder_compression = nn.Linear(config.window_dim * config.d_model, config.latent_dim)
+
+        if config.activation == 'relu':
+            self.output_activation = nn.ReLU()
+        elif config.activation == 'sigmoid':
+            self.output_activation = nn.Sigmoid()
+        elif config.activation == 'tanh':
+            self.output_activation = nn.Tanh()
+        else:
+            raise ValueError(f"Activation function {config.activation} not supported.")
 
     def forward(self, x):
         """Forward pass through the transformer encoder. Returns the latent representation."""
@@ -64,7 +73,7 @@ class TransformerEncoder(BaseEncoder):
         x = self.positional_encoding(x.transpose(0, 1)).transpose(0, 1)
         x = self.transformer_encoder(x).transpose(1, 2).reshape(x.shape[0], -1)
         x = self.encoder_compression(x)
-        x = F.sigmoid(x)
+        x = self.output_activation(x)
         return x
 
 
@@ -84,12 +93,21 @@ class TransformerDecoder(BaseDecoder):
                 nhead=config.nhead,
                 dim_feedforward=config.dim_feedforward,
                 dropout=config.dropout,
-                activation=config.activation,
+                activation='relu',
                 batch_first=True
             ),
             num_layers=config.num_layers
         )
         self.output_layer = nn.Linear(config.d_model, config.input_features)
+
+        if config.activation == 'relu':
+            self.output_activation = nn.ReLU()
+        elif config.activation == 'sigmoid':
+            self.output_activation = nn.Sigmoid()
+        elif config.activation == 'tanh':
+            self.output_activation = nn.Tanh()
+        else:
+            raise ValueError(f"Activation function {config.activation} not supported.")
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""

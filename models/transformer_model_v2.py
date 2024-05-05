@@ -29,6 +29,15 @@ class TransformerEncoder(BaseEncoder):
             num_layers=config.num_layers
         )
 
+        if config.activation == 'relu':
+            self.output_activation = nn.ReLU()
+        elif config.activation == 'sigmoid':
+            self.output_activation = nn.Sigmoid()
+        elif config.activation == 'tanh':
+            self.output_activation = nn.Tanh()
+        else:
+            raise ValueError(f"Activation function {config.activation} not supported.")
+
     def forward(self, x):
         """Forward pass through the transformer encoder. Returns the latent representation."""
         x = self.input_layer(x)
@@ -37,7 +46,7 @@ class TransformerEncoder(BaseEncoder):
         x = x.reshape(x.shape[0], -1)
         # Get the last segment of the output
         x = x[:, -self.config.latent_dim:]
-        x = F.sigmoid(x)
+        x = self.output_activation(x)
         return x
 
 
@@ -63,12 +72,23 @@ class TransformerDecoder(BaseDecoder):
             num_layers=config.num_layers
         )
         self.output_layer = nn.Linear(config.d_model, config.input_features)
+        self.padding = nn.ConstantPad1d((0, config.window_dim * config.d_model - config.latent_dim), 0)
+
+        if config.activation == 'relu':
+            self.output_activation = nn.ReLU()
+        elif config.activation == 'sigmoid':
+            self.output_activation = nn.Sigmoid()
+        elif config.activation == 'tanh':
+            self.output_activation = nn.Tanh()
+        else:
+            raise ValueError(f"Activation function {config.activation} not supported.")
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""
-        x = F.pad(x, (0, self.config.window_dim * self.config.d_model - self.config.latent_dim)).reshape(x.shape[0], -1, self.config.d_model)
+        x = self.padding(x).reshape(x.shape[0], -1, self.config.d_model)
         x = self.transformer_decoder(x)
         x = self.output_layer(x)
+        x = self.output_activation(x)
         return x
 
 

@@ -1,0 +1,67 @@
+program: train.py
+name: sweep_config_1
+method: bayes
+metric:
+  name: val_loss
+  goal: minimize
+parameters:
+  activation:
+    values:
+    - relu
+    - sigmoid
+    - tanh
+  batch_size:
+    value: 32
+  control_channel_name:
+    value: Analog In. | Ch.1 AIn-1 - Dem (AOut-3)
+  fiber_channel_name:
+    value: Analog In. | Ch.1 AIn-1 - Dem (AOut-2)
+  d_model:
+    value: 64
+  dim_feedforward:
+    value: 2048
+  dropout:
+    value: 0.1
+  input_features:
+    value: 52
+  latent_dim:
+    value: 64
+  learning_rate:
+    value: 0.001
+  lr_factor:
+    value: 0.1
+  lr_patience:
+    value: 5
+  max_epochs:
+    value: 100
+  max_time:
+    value: 00:01:00:00
+  model:
+    value: transformer_v1
+  monitor:
+    value: val_loss
+  nhead:
+    value: 4
+  normalization:
+    values:
+    - min-max
+    - standard
+    - robust
+    - quantile
+    - power
+  num_layers:
+    value: 2
+  num_workers:
+    value: 8
+  precision:
+    value: '32'
+  scheduler_frequency:
+    value: 1
+  scheduler_interval:
+    value: epoch
+  use_fiber:
+    value: true
+  use_tracking:
+    value: true
+  window_dim:
+    value: 1024

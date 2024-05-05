@@ -16,6 +16,15 @@ class FFTTransformerAutoencoder_1(TransformerAutoencoder_1):
         config.input_features = config.input_features * 2
         super(FFTTransformerAutoencoder_1, self).__init__(config)
 
+        if config.activation == 'relu':
+            self.output_activation = torch.nn.ReLU()
+        elif config.activation == 'sigmoid':
+            self.output_activation = torch.nn.Sigmoid()
+        elif config.activation == 'tanh':
+            self.output_activation = torch.nn.Tanh()
+        else:
+            raise ValueError(f"Activation function {config.activation} not supported.")
+
     def forward(self, x):
         """The forward pass"""
         x = torch.fft.fft(x, dim=1)
@@ -23,5 +32,5 @@ class FFTTransformerAutoencoder_1(TransformerAutoencoder_1):
         x = self.encoder(x)
         x = self.decoder(x)
         x = torch.fft.ifft(torch.complex(x[..., :x.shape[-1] // 2], x[..., x.shape[-1] // 2:]), dim=1).real
-        x = F.sigmoid(x)
+        x = self.output_activation(x)
         return x

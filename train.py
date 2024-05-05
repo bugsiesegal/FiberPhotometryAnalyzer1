@@ -42,7 +42,7 @@ def main(config, wandb_enabled, debug_run):
         callbacks=[
             ModelCheckpoint(monitor='val_loss', save_top_k=1),
             EarlyStopping(monitor='val_loss', patience=config.lr_patience),
-            LearningRateFinder(),
+            LearningRateFinder(num_training_steps=1000),
             BatchSizeFinder(),
             ModelSummary(max_depth=3)
         ] if not debug_run else [

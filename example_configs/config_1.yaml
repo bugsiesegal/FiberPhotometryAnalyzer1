@@ -16,13 +16,12 @@ max_time: 00:01:00:00
 model: transformer_v1
 monitor: val_loss
 nhead: 4
-normalize: true
+normalization: min-max
 num_layers: 2
 num_workers: 4
 precision: '32'
 scheduler_frequency: 1
 scheduler_interval: epoch
-use_fft: false
 use_fiber: true
 use_tracking: true
 window_dim: 1024
