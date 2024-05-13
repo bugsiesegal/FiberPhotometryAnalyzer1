@@ -66,6 +66,11 @@ class BaseAutoencoderModule(LightningModule, ABC):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=self.config.lr_factor,
                                                                patience=self.config.lr_patience, verbose=True)
+
+        # Log the learning rate to wandb
+        if self.logger is not None:
+            self.logger.experiment.log({'learning_rate': self.learning_rate})
+
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
@@ -76,9 +81,15 @@ class BaseAutoencoderModule(LightningModule, ABC):
             }
         }
 
+    def on_after_backward(self):
+        if self.trainer.global_step % 50 == 0:  # log every 25 steps
+            for name, param in self.named_parameters():
+                self.logger.experiment.log({f"{name}_grad": wandb.Histogram(param.grad)})
+
 
 class TransformerAutoencoderModule_1(BaseAutoencoderModule):
     """A module for a transformer autoencoder with linear layer for compression."""
+
     def __init__(self, config: Config):
         """
         Initializes the transformer autoencoder module.
@@ -107,6 +118,7 @@ class TransformerAutoencoderModule_1(BaseAutoencoderModule):
 
 class TransformerAutoencoderModule_2(BaseAutoencoderModule):
     """A module for a transformer autoencoder with cut off for compression."""
+
     def __init__(self, config: Config):
         """
         Initializes the transformer autoencoder module.
@@ -135,6 +147,7 @@ class TransformerAutoencoderModule_2(BaseAutoencoderModule):
 
 class FFTAutoencoderModule_V1(BaseAutoencoderModule):
     """A module for a transformer autoencoder using FFT and a linear layer for compression."""
+
     def __init__(self, config: Config):
         """
         Initializes the FFT autoencoder module.

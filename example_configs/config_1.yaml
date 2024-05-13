@@ -1,27 +1,27 @@
-activation: relu
+activation: sigmoid
 batch_size: 32
 control_channel_name: Analog In. | Ch.1 AIn-1 - Dem (AOut-3)
-d_model: 64
+d_model: 4
 data_dir: '/home/bugsie/PycharmProjects/FiberPhotometryAnalyzer/datafiles'
 dim_feedforward: 2048
 dropout: 0.1
 fiber_channel_name: Analog In. | Ch.1 AIn-1 - Dem (AOut-2)
-input_features: 52
+input_features: 1
 latent_dim: 64
 learning_rate: 0.001
 lr_factor: 0.1
 lr_patience: 5
 max_epochs: 100
-max_time: 00:01:00:00
+max_time: 00:05:00:00
 model: transformer_v1
 monitor: val_loss
 nhead: 4
-normalization: min-max
+normalization: quantile
 num_layers: 2
 num_workers: 4
 precision: '32'
 scheduler_frequency: 1
 scheduler_interval: epoch
 use_fiber: true
-use_tracking: true
+use_tracking: false
 window_dim: 1024

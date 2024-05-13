@@ -1,3 +1,5 @@
+import matplotlib.pyplot as plt
+
 from models.lightning_models import *
 from lightning import Trainer
 from lightning.pytorch.loggers import WandbLogger
@@ -42,12 +44,10 @@ def main(config, wandb_enabled, debug_run):
         callbacks=[
             ModelCheckpoint(monitor='val_loss', save_top_k=1),
             EarlyStopping(monitor='val_loss', patience=config.lr_patience),
-            LearningRateFinder(num_training_steps=1000),
             BatchSizeFinder(),
             ModelSummary(max_depth=3)
         ] if not debug_run else [
             EarlyStopping(monitor='val_loss', patience=config.lr_patience),
-            LearningRateFinder(),
             BatchSizeFinder(),
             ModelSummary(max_depth=3)
         ],
@@ -57,6 +57,21 @@ def main(config, wandb_enabled, debug_run):
         limit_train_batches=5 if debug_run else 1.0,
         limit_val_batches=5 if debug_run else 1.0,
     )
+
+    # Set up the learning rate finder
+    lr_finder = trainer.tuner.lr_find(model, data_module)
+
+    # Print the learning rate
+    print(f"Suggested learning rate: {lr_finder.suggestion()}")
+
+    # Initialize the model with the suggested learning rate
+    model.learning_rate = lr_finder.suggestion()
+
+    # Plot the learning rate to wandb
+    if wandb_enabled:
+        fig = lr_finder.plot(suggest=True)
+        wandb.log({"Learning Rate": fig})
+        plt.clf()
 
     # Fit the model
     trainer.fit(model, data_module)
