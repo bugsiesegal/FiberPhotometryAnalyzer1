@@ -17,9 +17,11 @@ model: transformer_v1
 monitor: val_loss
 nhead: 4
 normalization: quantile
+scaling: 100.0
+use_positional_encoding: false
 num_layers: 2
 num_workers: 4
-precision: '32'
+precision: '16-mixed'
 scheduler_frequency: 1
 scheduler_interval: epoch
 use_fiber: true

@@ -172,6 +172,12 @@ class FiberTrackingDataModule(LightningDataModule):
         # Normalize data
         self.data = self.normalize_data(self.data)
 
+        # Scale Data
+        self.data = [
+            (fiber * self.config.scaling, tracking * self.config.scaling)
+            for fiber, tracking in self.data
+        ]
+
     def setup(self, stage=None):
         """Split data into train, val, test sets."""
         # Split data into train, val, test

@@ -14,6 +14,7 @@ class Config:
     dropout: float = 0.1
     activation: str = 'relu'
     latent_dim: int = 128
+    use_positional_encoding: bool = True
 
     # Model selection
     model: str = 'transformer_v1'
@@ -44,6 +45,7 @@ class Config:
     fiber_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-2)'
     control_channel_name: str = 'Analog In. | Ch.1 AIn-1 - Dem (AOut-3)'
     normalization: str = 'min-max'
+    scaling: float = 1.0
 
     # Training configuration
     max_epochs: int = 100

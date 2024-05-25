@@ -5,6 +5,7 @@ from lightning import Trainer
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping, LearningRateFinder, BatchSizeFinder, \
     ModelSummary
+from lightning.pytorch.tuner import Tuner
 from config import Config
 from data import FiberTrackingDataModule
 import wandb
@@ -56,22 +57,27 @@ def main(config, wandb_enabled, debug_run):
         max_time=str(config.max_time) if not debug_run else '00:00:05:00',
         limit_train_batches=5 if debug_run else 1.0,
         limit_val_batches=5 if debug_run else 1.0,
+        gradient_clip_val=0.5,
+        gradient_clip_algorithm='value',
     )
 
-    # Set up the learning rate finder
-    lr_finder = trainer.tuner.lr_find(model, data_module)
+    # Initialize the tuner
+    tuner = Tuner(trainer)
 
-    # Print the learning rate
-    print(f"Suggested learning rate: {lr_finder.suggestion()}")
+    # Find the optimal learning rate
+    lr_finder = tuner.lr_find(model, data_module, min_lr=1e-14, max_lr=1e+4, num_training=1000, mode='exponential')
 
-    # Initialize the model with the suggested learning rate
-    model.learning_rate = lr_finder.suggestion()
-
-    # Plot the learning rate to wandb
+    # Log learning rate graph
     if wandb_enabled:
-        fig = lr_finder.plot(suggest=True)
-        wandb.log({"Learning Rate": fig})
+        wandb.log({'Learning Rate Finder': lr_finder.plot(suggest=True)})
         plt.clf()
+
+    # Pick the optimal learning rate
+    new_lr = lr_finder.suggestion()
+    model.learning_rate = new_lr
+
+    # Configure the optimizers learning rate
+    trainer.optimizers[0].param_groups[0]['lr'] = new_lr
 
     # Fit the model
     trainer.fit(model, data_module)

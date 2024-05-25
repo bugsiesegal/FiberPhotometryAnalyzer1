@@ -10,6 +10,7 @@ parameters:
     - relu
     - sigmoid
     - tanh
+    - hardsigmoid
   batch_size:
     value: 32
   data_dir:
@@ -19,13 +20,13 @@ parameters:
   fiber_channel_name:
     value: Analog In. | Ch.1 AIn-1 - Dem (AOut-2)
   d_model:
-    value: 64
+    value: 4
   dim_feedforward:
     value: 2048
   dropout:
     value: 0.1
   input_features:
-    value: 52
+    value: 1
   latent_dim:
     value: 64
   learning_rate:
@@ -33,7 +34,7 @@ parameters:
   lr_factor:
     value: 0.1
   lr_patience:
-    value: 5
+    value: 10
   max_epochs:
     value: 100
   max_time:
@@ -41,7 +42,7 @@ parameters:
   model:
     value: transformer_v1
   monitor:
-    value: val_loss
+    value: train_loss
   nhead:
     value: 4
   normalization:
@@ -52,15 +53,18 @@ parameters:
     - quantile
     - power
   num_layers:
-    value: 2
+    values:
+      - 2
+      - 4
+      - 6
   num_workers:
     value: 8
   precision:
     value: '32'
   scheduler_frequency:
-    value: 1
+    value: 100
   scheduler_interval:
-    value: epoch
+    value: step
   use_fiber:
     value: true
   use_tracking:

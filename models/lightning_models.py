@@ -53,7 +53,7 @@ class BaseAutoencoderModule(LightningModule, ABC):
                 plt.plot(x_hat[0, :, i].cpu().detach().numpy(), label='Reconstructed')
                 plt.legend()
                 loss = nn.functional.l1_loss(target=x, input=x_hat, reduction='none')
-                self.logger.experiment.log({f"Reconstruction Error {i}": loss, f"Plot {i}": plt}, step=self.global_step)
+                self.logger.experiment.log({f"Reconstruction Error {i}": wandb.Histogram(loss, num_bins=100), f"Plot {i}": plt})
                 plt.clf()
         return loss
 
@@ -67,10 +67,6 @@ class BaseAutoencoderModule(LightningModule, ABC):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=self.config.lr_factor,
                                                                patience=self.config.lr_patience, verbose=True)
 
-        # Log the learning rate to wandb
-        if self.logger is not None:
-            self.logger.experiment.log({'learning_rate': self.learning_rate})
-
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
@@ -82,9 +78,8 @@ class BaseAutoencoderModule(LightningModule, ABC):
         }
 
     def on_after_backward(self):
-        if self.trainer.global_step % 50 == 0:  # log every 25 steps
-            for name, param in self.named_parameters():
-                self.logger.experiment.log({f"{name}_grad": wandb.Histogram(param.grad)})
+        if self.trainer.global_step % 25 == 0:  # log every 25 steps
+            self.logger.experiment.log({"Learning Rate": self.trainer.optimizers[0].param_groups[0]['lr']})
 
 
 class TransformerAutoencoderModule_1(BaseAutoencoderModule):

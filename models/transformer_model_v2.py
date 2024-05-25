@@ -16,7 +16,10 @@ class TransformerEncoder(BaseEncoder):
         """
         super(TransformerEncoder, self).__init__(config)
         self.input_layer = nn.Linear(config.input_features, config.d_model)
-        self.positional_encoding = PositionalEncoding(config.d_model, config.dropout, config.window_dim)
+        if self.config.use_positional_encoding:
+            self.positional_encoding = PositionalEncoding(config.d_model, config.dropout, config.window_dim)
+        else:
+            self.positional_encoding = nn.Identity()
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=config.d_model,
@@ -31,15 +34,14 @@ class TransformerEncoder(BaseEncoder):
 
         self.output_activation = _get_activation(config.activation)
 
-
     def forward(self, x):
         """Forward pass through the transformer encoder. Returns the latent representation."""
         x = self.input_layer(x)
         x = self.positional_encoding(x.transpose(0, 1)).transpose(0, 1)
         x = self.transformer_encoder(x).transpose(1, 2)
         x = x.reshape(x.shape[0], -1)
-        # Get the last segment of the output
-        x = x[:, -self.config.latent_dim:]
+        # Set all values to zero after the latent dimension
+        x[:, self.config.latent_dim:] = 0
         x = self.output_activation(x)
         return x
 
@@ -66,13 +68,11 @@ class TransformerDecoder(BaseDecoder):
             num_layers=config.num_layers
         )
         self.output_layer = nn.Linear(config.d_model, config.input_features)
-        self.padding = nn.ConstantPad1d((0, config.window_dim * config.d_model - config.latent_dim), 0)
 
         self.output_activation = _get_activation(config.activation)
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""
-        x = self.padding(x).reshape(x.shape[0], -1, self.config.d_model)
         x = self.transformer_decoder(x)
         x = self.output_layer(x)
         x = self.output_activation(x)

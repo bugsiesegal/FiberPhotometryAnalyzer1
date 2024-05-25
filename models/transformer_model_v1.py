@@ -16,6 +16,8 @@ def _get_activation(activation: str):
         return nn.Tanh()
     elif activation == 'linear':
         return nn.Identity()
+    elif activation == 'hardsigmoid':
+        return nn.Hardsigmoid()
     else:
         raise ValueError(f"Activation function {activation} not supported.")
 
@@ -59,7 +61,10 @@ class TransformerEncoder(BaseEncoder):
         """
         super(TransformerEncoder, self).__init__(config)
         self.input_layer = nn.Linear(config.input_features, config.d_model)
-        self.positional_encoding = PositionalEncoding(config.d_model, config.dropout, config.window_dim)
+        if self.config.use_positional_encoding:
+            self.positional_encoding = PositionalEncoding(config.d_model, config.dropout, config.window_dim)
+        else:
+            self.positional_encoding = nn.Identity()
         self.transformer_encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=config.d_model,
