@@ -26,7 +26,7 @@ class TransformerEncoder(BaseEncoder):
                 nhead=config.nhead,
                 dim_feedforward=config.dim_feedforward,
                 dropout=config.dropout,
-                activation=config.activation,
+                activation='relu',
                 batch_first=True
             ),
             num_layers=config.num_layers
@@ -62,7 +62,7 @@ class TransformerDecoder(BaseDecoder):
                 nhead=config.nhead,
                 dim_feedforward=config.dim_feedforward,
                 dropout=config.dropout,
-                activation=config.activation,
+                activation='relu',
                 batch_first=True
             ),
             num_layers=config.num_layers
@@ -73,7 +73,7 @@ class TransformerDecoder(BaseDecoder):
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""
-        x = self.transformer_decoder(x)
+        x = self.transformer_decoder(x.reshape(x.shape[0], -1, self.config.d_model))
         x = self.output_layer(x)
         x = self.output_activation(x)
         return x

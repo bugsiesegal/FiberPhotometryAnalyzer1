@@ -38,12 +38,13 @@ class BaseAutoencoderModule(LightningModule, ABC):
 
     def training_step(self, batch, batch_idx):
         loss = self._common_step(batch, batch_idx)
-        self.log('train_loss', loss)
+        # Convert loss to float32 to avoid overflow
+        self.log('train_loss', loss.to(torch.float32).cpu())
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self._common_step(batch, batch_idx)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss.to(torch.float32).cpu())
 
         if batch_idx == 0 and self.logger is not None:
             x = batch
@@ -53,13 +54,13 @@ class BaseAutoencoderModule(LightningModule, ABC):
                 plt.plot(x_hat[0, :, i].cpu().detach().numpy(), label='Reconstructed')
                 plt.legend()
                 loss = nn.functional.l1_loss(target=x, input=x_hat, reduction='none')
-                self.logger.experiment.log({f"Reconstruction Error {i}": wandb.Histogram(loss, num_bins=100), f"Plot {i}": plt})
+                self.logger.experiment.log({f"Reconstruction Error {i}": wandb.Histogram(loss.cpu(), num_bins=100), f"Plot {i}": plt})
                 plt.clf()
         return loss
 
     def test_step(self, batch, batch_idx):
         loss = self._common_step(batch, batch_idx)
-        self.log('test_loss', loss)
+        self.log('test_loss', loss.to(torch.float32).cpu())
         return loss
 
     def configure_optimizers(self) -> Any:

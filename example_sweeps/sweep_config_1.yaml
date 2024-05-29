@@ -6,21 +6,21 @@ metric:
   goal: minimize
 parameters:
   activation:
-    values:
-    - relu
-    - sigmoid
-    - tanh
-    - hardsigmoid
+    value: linear
   batch_size:
     value: 32
   data_dir:
-    value: '/home/bugsie/PycharmProjects/FiberPhotometryAnalyzer/datafiles'
+    value: '/workspace/FiberPhotometryAnalyzer/datafiles'
   control_channel_name:
     value: Analog In. | Ch.1 AIn-1 - Dem (AOut-3)
   fiber_channel_name:
     value: Analog In. | Ch.1 AIn-1 - Dem (AOut-2)
   d_model:
-    value: 4
+    values:
+        - 4
+        - 8
+        - 16
+        - 64
   dim_feedforward:
     value: 2048
   dropout:
@@ -28,27 +28,35 @@ parameters:
   input_features:
     value: 1
   latent_dim:
-    value: 64
+    values:
+        - 4
+        - 16
+        - 64
+        - 128
+        - 256
   learning_rate:
     value: 0.001
   lr_factor:
     value: 0.1
   lr_patience:
-    value: 10
+    value: 5
   max_epochs:
     value: 100
   max_time:
-    value: 00:01:00:00
+    value: 00:02:00:00
   model:
-    value: transformer_v1
+    value: transformer_v2
   monitor:
-    value: train_loss
+    value: val_loss
   nhead:
-    value: 4
+    values:
+        - 4
+        - 8
+        - 16
+        - 64
   normalization:
     values:
     - min-max
-    - standard
     - robust
     - quantile
     - power
@@ -57,17 +65,29 @@ parameters:
       - 2
       - 4
       - 6
+      - 12
+      - 24
   num_workers:
     value: 8
+  use_positional_encoding:
+    values:
+      - true
+      - false
+  scaling:
+    values:
+      - 1.0
+      - 0.1
+      - 10.0
+      - 100.0
   precision:
-    value: '32'
+    value: '16-mixed'
   scheduler_frequency:
-    value: 100
+    value: 1
   scheduler_interval:
-    value: step
+    value: epoch
   use_fiber:
     value: true
   use_tracking:
-    value: true
+    value: false
   window_dim:
     value: 1024

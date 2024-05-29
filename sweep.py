@@ -1,3 +1,5 @@
+from lightning.pytorch.tuner import Tuner
+
 from models.lightning_models import *
 from lightning import Trainer
 from lightning.pytorch.loggers import WandbLogger
@@ -32,7 +34,6 @@ def main():
         callbacks=[
             ModelCheckpoint(monitor='val_loss', save_top_k=1),
             EarlyStopping(monitor='val_loss', patience=config.lr_patience),
-            LearningRateFinder(num_training_steps=100),
             BatchSizeFinder(),
             ModelSummary(max_depth=3)
         ],
@@ -41,7 +42,26 @@ def main():
         max_time=str(config.max_time),
         limit_train_batches=1.0,
         limit_val_batches=1.0,
+        gradient_clip_val=0.5,
+        gradient_clip_algorithm='value',
     )
+
+    # Initialize the tuner
+    tuner = Tuner(trainer)
+
+    # Find the optimal learning rate
+    lr_finder = tuner.lr_find(model, data_module, min_lr=1e-14, max_lr=1e+4, num_training=1000, mode='exponential')
+
+    # Log learning rate graph
+    wandb.log({'Learning Rate Finder': lr_finder.plot(suggest=True)})
+    plt.clf()
+
+    # Pick the optimal learning rate
+    new_lr = lr_finder.suggestion()
+    model.learning_rate = new_lr
+
+    # Configure the optimizers learning rate
+    trainer.optimizers[0].param_groups[0]['lr'] = new_lr
 
     # Fit the model
     trainer.fit(model, data_module)
