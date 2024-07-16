@@ -110,21 +110,17 @@ ptyprocess==0.7.0
 pure-eval==0.2.2
 pycparser==2.21
 Pygments==2.16.1
-PyGObject==3.42.1
 PyJWT==2.3.0
 pyparsing==2.4.7
-python-apt==2.4.0+ubuntu2
 python-dateutil==2.8.2
 python-json-logger==2.0.7
 pytorch-lightning==2.2.5
 pytz==2024.1
 PyYAML==6.0.1
 pyzmq==24.0.1
-referencing==0.30.2
 requests==2.31.0
 rfc3339-validator==0.1.4
 rfc3986-validator==0.1.1
-rpds-py==0.12.0
 scikit-learn==1.5.0
 scipy==1.13.1
 SecretStorage==3.3.1
@@ -164,3 +160,5 @@ websocket-client==1.6.4
 widgetsnbextension==4.0.9
 yarl==1.9.4
 zipp==1.0.0
+hilbertcurve==2.0.5
+torch-tb-profiler==0.4.3

@@ -213,3 +213,11 @@ class FiberTrackingDataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False
         )
+
+    def predict_dataloader(self):
+        return DataLoader(
+            FiberTrackingDataset(self.data, self.config.window_dim, self.config.use_fiber, self.config.use_tracking),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False
+        )

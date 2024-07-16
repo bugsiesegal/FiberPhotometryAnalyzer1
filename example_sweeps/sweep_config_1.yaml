@@ -28,12 +28,8 @@ parameters:
   input_features:
     value: 1
   latent_dim:
-    values:
+    value:
         - 4
-        - 16
-        - 64
-        - 128
-        - 256
   learning_rate:
     value: 0.001
   lr_factor:
@@ -53,32 +49,23 @@ parameters:
         - 4
         - 8
         - 16
-        - 64
   normalization:
-    values:
-    - min-max
-    - robust
+    value:
     - quantile
-    - power
   num_layers:
     values:
       - 2
       - 4
       - 6
       - 12
-      - 24
   num_workers:
-    value: 8
+    value: 9
   use_positional_encoding:
-    values:
-      - true
+    value:
       - false
   scaling:
-    values:
+    value:
       - 1.0
-      - 0.1
-      - 10.0
-      - 100.0
   precision:
     value: '16-mixed'
   scheduler_frequency:
@@ -91,3 +78,19 @@ parameters:
     value: false
   window_dim:
     value: 1024
+  sparsity_target:
+    values:
+      - 0.01
+      - 0.05
+      - 0.1
+      - 0.2
+  sparsity_weight:
+    values:
+      - 0.0000001
+      - 0.000001
+      - 0.00001
+      - 0.0001
+      - 0.001
+      - 0.01
+      - 0.1
+      - 1.0

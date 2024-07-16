@@ -71,13 +71,14 @@ class TransformerDecoder(BaseDecoder):
 
     def forward(self, x):
         """Forward pass through the transformer decoder. Returns the reconstructed input."""
+        x = x.reshape(x.shape[0], -1, self.config.d_model)
         x = self.transformer_decoder(x, x)
         x = self.output_layer(x)
         x = self.output_activation(x)
         return x
 
 
-class TransformerAutoencoderModule_3(BaseAutoencoder):
+class TransformerAutoencoder_3(BaseAutoencoder):
     """A transformer autoencoder module. Uses a cut-off for compression. Using a full transformer."""
 
     def __init__(self, config: Config):
@@ -85,7 +86,7 @@ class TransformerAutoencoderModule_3(BaseAutoencoder):
         Initializes the transformer autoencoder.
         :param config: The configuration object
         """
-        super(TransformerAutoencoderModule_3, self).__init__(config)
+        super(TransformerAutoencoder_3, self).__init__(config)
         self.encoder = TransformerEncoder(config)
         self.decoder = TransformerDecoder(config)
 

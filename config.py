@@ -16,11 +16,16 @@ class Config:
     latent_dim: int = 128
     use_positional_encoding: bool = True
 
+    # Optional Sparse model configuration
+    sparsity_target: float = 0.05
+    sparsity_weight: float = 1e-3
+
     # Model selection
     model: str = 'transformer_v1'
 
     # Learning parameters
     learning_rate: float = 1e-3
+    sparsity_lr: float = 1e-3
     lr_factor: float = 0.1
     lr_patience: int = 5
 

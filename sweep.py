@@ -1,3 +1,5 @@
+import os
+
 from lightning.pytorch.tuner import Tuner
 
 from models.lightning_models import *
@@ -11,6 +13,7 @@ import wandb
 import click
 
 def main():
+    checkpoint = None
     # Initialize Weights & Biases
     wandb.init(project='fiber-tracking')
 
@@ -20,11 +23,35 @@ def main():
 
     # Initialize the model
     if config.model == 'transformer_v1':
-        model = TransformerAutoencoderModule_1(config)
+        if checkpoint is not None:
+            model = TransformerAutoencoderModule_1.load_from_checkpoint(checkpoint, config=config)
+        else:
+            model = TransformerAutoencoderModule_1(config)
     elif config.model == 'fft_transformer_v1':
-        model = FFTAutoencoderModule_V1(config)
+        if checkpoint is not None:
+            model = FFTAutoencoderModule_V1.load_from_checkpoint(checkpoint, config=config)
+        else:
+            model = FFTAutoencoderModule_V1(config)
     elif config.model == 'transformer_v2':
-        model = TransformerAutoencoderModule_2(config)
+        if checkpoint is not None:
+            model = TransformerAutoencoderModule_2.load_from_checkpoint(checkpoint, config=config)
+        else:
+            model = TransformerAutoencoderModule_2(config)
+    elif config.model == 'transformer_v3':
+        if checkpoint is not None:
+            model = TransformerAutoencoderModule_3.load_from_checkpoint(checkpoint, config=config)
+        else:
+            model = TransformerAutoencoderModule_3(config)
+    elif config.model == 'transformer_v4':
+        if checkpoint is not None:
+            model = TransformerAutoencoderModule_4.load_from_checkpoint(checkpoint, config=config)
+        else:
+            model = TransformerAutoencoderModule_4(config)
+    elif config.model == 'sparse':
+        if checkpoint is not None:
+            model = SparseAutoencoderModule.load_from_checkpoint(checkpoint, config=config)
+        else:
+            model = SparseAutoencoderModule(config)
     else:
         raise ValueError(f'Invalid model: {config.model}')
 
@@ -32,9 +59,9 @@ def main():
     trainer = Trainer(
         logger=[WandbLogger(project='fiber-tracking', config=config)],
         callbacks=[
-            ModelCheckpoint(monitor='val_loss', save_top_k=1),
-            EarlyStopping(monitor='val_loss', patience=config.lr_patience),
-            BatchSizeFinder(),
+            ModelCheckpoint(monitor='val_loss', save_top_k=1, dirpath=os.path.join(os.getcwd(), "checkpoints")),
+            # EarlyStopping(monitor='val_loss', patience=config.lr_patience),
+            BatchSizeFinder(mode="binsearch"),
             ModelSummary(max_depth=3)
         ],
         max_epochs=config.max_epochs,
@@ -50,7 +77,7 @@ def main():
     tuner = Tuner(trainer)
 
     # Find the optimal learning rate
-    lr_finder = tuner.lr_find(model, data_module, min_lr=1e-14, max_lr=1e+4, num_training=1000, mode='exponential')
+    lr_finder = tuner.lr_find(model, data_module, min_lr=1e-8, max_lr=1e+4, num_training=1000, mode='exponential')
 
     # Log learning rate graph
     wandb.log({'Learning Rate Finder': lr_finder.plot(suggest=True)})
