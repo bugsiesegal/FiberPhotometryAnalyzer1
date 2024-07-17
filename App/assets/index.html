@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            body {
+                background-color: #f8f9fa;
+                height: 100vh;
+                margin: 0;
+                padding: 0;
+            }
+            #root {
+                height: 100%;
+            }
+            .upload-area {
+                border: 2px dashed #007bff;
+                border-radius: 5px;
+                padding: 10px;
+                text-align: center;
+                cursor: pointer;
+            }
+            .nav-buttons {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+            .nav-buttons button {
+                margin: 0 5px;
+            }
+            .graph-container {
+                height: calc(100vh - 250px);
+                min-height: 400px;
+            }
+            .graph-card {
+                height: 100%;
+            }
+            .graph-card-body {
+                height: calc(100% - 40px);
+                padding: 0;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>

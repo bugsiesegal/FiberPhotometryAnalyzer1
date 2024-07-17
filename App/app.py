@@ -1,59 +1,40 @@
 import base64
 import io
+import os
+from lib2to3.pgen2.grammar import opmap
+from typing import List, Tuple, Dict, Any
 
 import dash
+from dash import dcc, html, callback_context
+from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import dcc, html
-from dash.dependencies import Input, Output, State
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+# Constants
+FIBER_CHANNEL_NAME = "Analog In. | Ch.1 AIn-1 - Dem (AOut-2)"
+CONTROL_CHANNEL_NAME = "Analog In. | Ch.1 AIn-1 - Dem (AOut-3)"
+PRIMARY_COLOR = "#007bff"
+SECONDARY_COLOR = "#6c757d"
+BACKGROUND_COLOR = "#f8f9fa"
 
-app.layout = dbc.Container([
-    dbc.Row([
-        dbc.Col(html.H1("AI Dashboard"), width=12)
-    ]),
-    dbc.Row([
-        dbc.Col(dcc.Upload(
-            id='upload-data',
-            children=html.Div([
-                'Drag and Drop or ',
-                html.A('Select Files')
-            ]),
-            className='upload-area',
-            multiple=True
-        ), width=12)
-    ]),
-    dbc.Row([
-        dbc.Col(dcc.Loading(dcc.Graph(id='fiber-photometry-graph')), width=12)
-    ]),
-    dbc.Row([
-        dbc.Col(dcc.Loading(html.Div(dcc.Graph(id='tracking-graph', className='square-graph'), className='square-graph-container')), width=12)
-    ]),
-    dbc.Row([
-        dbc.Col(dbc.Button("<", id="prev-button", n_clicks=0), width="auto"),
-        dbc.Col(html.Div(id='current-figure-index-output'), width="auto"),
-        dbc.Col(dbc.Button(">", id="next-button", n_clicks=0), width="auto")
-    ]),
-    dcc.Store(id='data-store', data={}),
-    dcc.Store(id='current-figure-index', data=0),
-    dcc.Store(id='figures', data=[]),
-    dcc.Store(id='tracking-figures', data=[])
-])
+# Initialize the Dash app
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME])
 
-def process_fiber_data(fiber_data,
-                       fiber_channel_name="Analog In. | Ch.1 AIn-1 - Dem (AOut-2)",
-                       control_channel_name="Analog In. | Ch.1 AIn-1 - Dem (AOut-3)"):
-    fiber_channel = fiber_data[fiber_channel_name].to_numpy()
-    control_channel = fiber_data[control_channel_name].to_numpy()
-    fiber_channel -= control_channel
-    return fiber_channel
+# Load Custom Index
+app.index_string = open(os.path.join(os.path.dirname(__file__), "assets", "index.html")).read()
 
+# Helper functions
+def process_fiber_data(fiber_data: pd.DataFrame) -> np.ndarray:
+    """Process fiber photometry data."""
+    fiber_channel = fiber_data[FIBER_CHANNEL_NAME].to_numpy()
+    control_channel = fiber_data[CONTROL_CHANNEL_NAME].to_numpy()
+    return fiber_channel - control_channel
 
-def process_tracking_data(tracking_data):
+def process_tracking_data(tracking_data: pd.DataFrame) -> np.ndarray:
+    """Process tracking data."""
     column_names = tracking_data.columns
     x_columns = [column for column in column_names if '_x' in column]
     y_columns = [column for column in column_names if '_y' in column]
@@ -61,59 +42,56 @@ def process_tracking_data(tracking_data):
     x = tracking_data[x_columns].to_numpy()
     y = tracking_data[y_columns].to_numpy()
     z = tracking_data[z_columns].to_numpy()
-    tracking = np.concatenate([x, y, z], axis=1)
-    return tracking
+    return np.concatenate([x, y, z], axis=1)
 
-
-def parse_contents(contents, filename):
+def parse_contents(contents: str, filename: str) -> Tuple[pd.DataFrame, str]:
+    """Parse uploaded file contents."""
     content_type, content_string = contents.split(',')
-
     decoded = base64.b64decode(content_string)
     df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
     return df, filename
 
-
-def plot_fiber_data(fiber_data, filename):
-    fiber_data = pd.DataFrame(
-        {'Time (Seconds)':fiber_data["Time(s)"], 'Fiber':fiber_data["Analog In. | Ch.1 AIn-1 - Dem (AOut-2)"] - fiber_data["Analog In. | Ch.1 AIn-1 - Dem (AOut-3)"]},
+def plot_fiber_data(fiber_data: pd.DataFrame, filename: str) -> go.Figure:
+    """Create a plot for fiber photometry data."""
+    fiber_data = pd.DataFrame({
+        'Time (Seconds)': fiber_data["Time(s)"],
+        'Fiber': fiber_data[FIBER_CHANNEL_NAME] - fiber_data[CONTROL_CHANNEL_NAME]
+    })
+    fig = px.line(x="Time (Seconds)", y="Fiber", data_frame=fiber_data)
+    fig.update_layout(
+        title=filename,
+        plot_bgcolor=BACKGROUND_COLOR,
+        paper_bgcolor=BACKGROUND_COLOR,
+        font_color=SECONDARY_COLOR,
+        margin=dict(l=50, r=50, t=30, b=30),
+        autosize=True,
     )
-    # Select only columns with x, y, z
-    fig = px.line(x="Time (Seconds)", y="Fiber", data_frame=fiber_data, title=filename)
     return fig
 
-
-def plot_tracking_data(tracking_data, filename):
-    # Select only columns with x, y, z
+def plot_tracking_data(tracking_data: pd.DataFrame, filename: str) -> go.Figure:
+    """Create a 3D plot for tracking data."""
     tracking_data = tracking_data.filter(regex='.*(_x|_y|_z).*')
 
-    # Define the connections between joints as pairs of column indices
     connections = [
-        (0, 3), (3, 6), (6, 4), (4, 5), (5, 7), (7, 8), # Head and body
-        (0, 1), (0, 2), # Nose to right and left ear
-        (9, 10), (10, 5), # Left Front Leg
-        (11, 12), (12, 5), # Right Front Leg
-        (13, 14), (14, 6), # Left Hind Leg
-        (15, 16), (16, 6) # Right Hind Leg
+        (0, 3), (3, 6), (6, 4), (4, 5), (5, 7), (7, 8),  # Head and body
+        (0, 1), (0, 2),  # Nose to right and left ear
+        (9, 10), (10, 5),  # Left Front Leg
+        (11, 12), (12, 5),  # Right Front Leg
+        (13, 14), (14, 6),  # Left Hind Leg
+        (15, 16), (16, 6)  # Right Hind Leg
     ]
 
     fig = go.Figure()
-
-    # Get the number of frames (assuming each row is a frame)
     num_frames = len(tracking_data)
-
-    # Normalize frame indices to the range [0, 1] for color mapping
     normalized_frames = np.linspace(0, 1, num_frames)
 
-    # Add scatter plot for each frame with color indicating time
     for frame, norm_frame in enumerate(normalized_frames):
-        # Map normalized frame index to a color in the Viridis colormap
         color = px.colors.sample_colorscale('Viridis', norm_frame)
-
-        for (start, end) in connections:
+        for start, end in connections:
             fig.add_trace(go.Scatter3d(
                 x=[tracking_data.iloc[frame, start * 3], tracking_data.iloc[frame, end * 3]],
-                z=[-tracking_data.iloc[frame, start * 3 + 1], -tracking_data.iloc[frame, end * 3 + 1]],  # Swap y and z
-                y=[tracking_data.iloc[frame, start * 3 + 2], tracking_data.iloc[frame, end * 3 + 2]],  # Swap y and z
+                z=[-tracking_data.iloc[frame, start * 3 + 1], -tracking_data.iloc[frame, end * 3 + 1]],
+                y=[tracking_data.iloc[frame, start * 3 + 2], tracking_data.iloc[frame, end * 3 + 2]],
                 mode='lines',
                 line=dict(color=color, width=2),
                 showlegend=False,
@@ -124,15 +102,39 @@ def plot_tracking_data(tracking_data, filename):
         scene=dict(
             xaxis_title='X',
             yaxis_title='Y',
-            zaxis_title='Z'
+            zaxis_title='Z',
+            aspectmode='cube'
         ),
-        title=filename
+        title=filename,
+        plot_bgcolor=BACKGROUND_COLOR,
+        paper_bgcolor=BACKGROUND_COLOR,
+        font_color=SECONDARY_COLOR,
+        margin=dict(l=0, r=0, t=30, b=0),
+        autosize=True,
     )
+
+    # Add color bar to show time progression
+    fig.add_trace(go.Scatter3d(
+        x=[None], y=[None], z=[None],
+        mode='markers',
+        marker=dict(
+            colorscale='Viridis',
+            showscale=True,
+            colorbar=dict(title='Time', thickness=10, len=0.6, y=0.5)
+        ),
+        showlegend=False
+    ))
 
     return fig
 
-
-def process_upload(list_of_contents, list_of_names, data_dict, figures, tracking_figures):
+def process_upload(
+        list_of_contents: List[str],
+        list_of_names: List[str],
+        data_dict: Dict[str, Any],
+        figures: List[go.Figure],
+        tracking_figures: List[go.Figure]
+) -> Tuple[Dict[str, Any], List[go.Figure], List[go.Figure]]:
+    """Process uploaded files and generate figures."""
     if list_of_contents is not None:
         for contents, filename in zip(list_of_contents, list_of_names):
             df, filename = parse_contents(contents, filename)
@@ -146,10 +148,103 @@ def process_upload(list_of_contents, list_of_names, data_dict, figures, tracking
                 data_dict[filename.strip(".csv").strip("tracking-")] = tracking_data.tolist()
     return data_dict, figures, tracking_figures
 
-
-def update_figure(figures, current_figure_index):
+def update_figure(figures: List[go.Figure], current_figure_index: int) -> go.Figure:
+    """Update the displayed figure based on the current index."""
     return figures[current_figure_index]
 
+# Layout components
+upload_area = dcc.Upload(
+    id='upload-data',
+    children=html.Div([
+        'Drag and Drop or ',
+        html.A('Select Files', style={"color": PRIMARY_COLOR})
+    ]),
+    className='upload-area mb-2',
+    multiple=True
+)
+
+collapse_button = dbc.Button(
+    "Toggle Uploaded Files",
+    id="collapse-button",
+    className="mb-3",
+    color="primary",
+    n_clicks=0,
+)
+
+collapse_content = dbc.Collapse(
+    dbc.Card(dbc.CardBody(html.Div(id="uploaded-files"))),
+    id="collapse",
+    is_open=False,
+)
+
+fiber_graph = dbc.Card([
+    dbc.CardHeader("Fiber Photometry Data"),
+    dbc.CardBody([
+        dcc.Loading(dcc.Graph(id='fiber-photometry-graph', className='graph-container'))
+    ], className="graph-card-body")
+], className="h-100")
+
+tracking_graph = dbc.Card([
+    dbc.CardHeader("Mouse Tracking Data"),
+    dbc.CardBody([
+        dcc.Loading(dcc.Graph(id='tracking-graph', className='graph-container'))
+    ], className="graph-card-body")
+], className="h-100")
+
+navigation_buttons = html.Div([
+    dbc.Button("Previous", id="prev-button", color="primary", size="sm", className="mr-1"),
+    html.Span(id='current-figure-index-output', className="mx-1"),
+    dbc.Button("Next", id="next-button", color="primary", size="sm", className="ml-1")
+], className="nav-buttons")
+
+instructions = html.Div([
+    html.H4("How to use this dashboard:", className="mt-4"),
+    html.Ul([
+        html.Li("Upload your fiber photometry and tracking data files using the upload area above."),
+        html.Li("The fiber photometry graph will show the processed signal over time."),
+        html.Li("The tracking graph displays the mouse's movement in 3D, with color indicating time."),
+        html.Li("Use the 'Previous' and 'Next' buttons to navigate between uploaded datasets.")
+    ])
+])
+
+# Define the layout
+app.layout = dbc.Container([
+    dbc.Row([
+        dbc.Col(html.H1("AI Dashboard", className="text-center my-2", style={"color": PRIMARY_COLOR}), width=12)
+    ]),
+    dbc.Row([dbc.Col(upload_area, width=12)]),
+    dbc.Row([dbc.Col([collapse_button, collapse_content], width=12)]),
+    dbc.Row([
+        dbc.Col(fiber_graph, width=6, className="mb-3"),
+        dbc.Col(tracking_graph, width=6, className="mb-3"),
+    ], className="flex-fill"),
+    dbc.Row([dbc.Col(navigation_buttons, width=12)]),
+    dbc.Row([dbc.Col(instructions, width=12)]),
+    dcc.Store(id='data-store', data={}),
+    dcc.Store(id='current-figure-index', data=0),
+    dcc.Store(id='figures', data=[]),
+    dcc.Store(id='tracking-figures', data=[])
+], fluid=True, style={"height": "100vh"})
+
+# Callbacks
+@app.callback(
+    Output('uploaded-files', 'children'),
+    Input('upload-data', 'filename')
+)
+def update_uploaded_files(uploaded_filenames):
+    if not uploaded_filenames:
+        return "No files uploaded yet."
+    return html.Ul([html.Li(filename) for filename in uploaded_filenames], className="mb-0")
+
+@app.callback(
+    Output("collapse", "is_open"),
+    [Input("collapse-button", "n_clicks")],
+    [State("collapse", "is_open")],
+)
+def toggle_collapse(n, is_open):
+    if n:
+        return not is_open
+    return is_open
 
 @app.callback(
     [Output('data-store', 'data'),
@@ -167,26 +262,27 @@ def update_figure(figures, current_figure_index):
      State('figures', 'data'),
      State('tracking-figures', 'data')]
 )
-def update_output(list_of_contents, prev_button, next_button, list_of_names, data_dict, current_figure_index, figures, tracking_figures):
-    changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
-    if 'upload-data' in changed_id:
-        if list_of_contents:
-            data_dict, new_figures, new_tracking_figures = process_upload(list_of_contents, list_of_names, data_dict, [], [])
-            figures.extend(new_figures)
-            tracking_figures.extend(new_tracking_figures)
-            current_figure_index = 0
-            return data_dict, figures, tracking_figures, figures[current_figure_index], tracking_figures[current_figure_index], current_figure_index
+def update_output(list_of_contents, prev_button, next_button, list_of_names, data_dict, current_figure_index, figures,
+                  tracking_figures):
+    """Update the dashboard based on user interactions."""
+    changed_id = [p['prop_id'] for p in callback_context.triggered][0]
 
+    if 'upload-data' in changed_id and list_of_contents:
+        data_dict, new_figures, new_tracking_figures = process_upload(list_of_contents, list_of_names, data_dict, [],
+                                                                      [])
+        figures.extend(new_figures)
+        tracking_figures.extend(new_tracking_figures)
+        current_figure_index = 0
     elif 'prev-button' in changed_id and figures:
         current_figure_index = max(current_figure_index - 1, 0)
-        return data_dict, figures, tracking_figures, update_figure(figures, current_figure_index), update_figure(tracking_figures, current_figure_index), current_figure_index
-
     elif 'next-button' in changed_id and figures:
         current_figure_index = min(current_figure_index + 1, len(figures) - 1)
-        return data_dict, figures, tracking_figures, update_figure(figures, current_figure_index), update_figure(tracking_figures, current_figure_index), current_figure_index
 
-    return data_dict, figures, tracking_figures, figures[current_figure_index] if figures else px.line([0, 0], title='No data'), tracking_figures[current_figure_index] if tracking_figures else px.scatter_3d([(0,0,0)], title="No Data"), current_figure_index
+    fiber_figure = update_figure(figures, current_figure_index) if figures else px.line([0, 0], title='No data')
+    tracking_figure = update_figure(tracking_figures, current_figure_index) if tracking_figures else px.scatter_3d(
+        [(0, 0, 0)], title="No Data")
 
+    return data_dict, figures, tracking_figures, fiber_figure, tracking_figure, current_figure_index
 
 if __name__ == '__main__':
     app.run_server(debug=True)
