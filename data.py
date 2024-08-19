@@ -157,7 +157,11 @@ class FiberTrackingDataModule(LightningDataModule):
         # Find tracking path which includes fiber paths base name
         for fiber_path in fiber_paths:
             fiber_base_name = fiber_path.split('/')[-1].split('.')[0]
-            tracking_path = [tracking_path for tracking_path in tracking_paths if fiber_base_name in tracking_path][0]
+            tracking_path = None
+            for path in tracking_paths:
+                if fiber_base_name in path:
+                    tracking_path = path
+                    break
             self.fiber_tracking_pairs.append((fiber_path, tracking_path))
 
         # Load data
@@ -165,6 +169,154 @@ class FiberTrackingDataModule(LightningDataModule):
             (self.load_fiber(fiber_path), self.load_tracking(tracking_path))
             for fiber_path, tracking_path in self.fiber_tracking_pairs
         ]
+
+        # Fit normalization
+        self.fit_normalization(self.data)
+
+        # Normalize data
+        self.data = self.normalize_data(self.data)
+
+        # Scale Data
+        self.data = [
+            (fiber * self.config.scaling, tracking * self.config.scaling)
+            for fiber, tracking in self.data
+        ]
+
+    def setup(self, stage=None):
+        """Split data into train, val, test sets."""
+        # Split data into train, val, test
+        train_size = int(0.7 * len(self.data))
+        val_size = int(0.15 * len(self.data))
+        test_size = len(self.data) - train_size - val_size
+        self.train_data, self.val_data, self.test_data = torch.utils.data.random_split(
+            self.data, [train_size, val_size, test_size]
+        )
+
+    def train_dataloader(self):
+        return DataLoader(
+            FiberTrackingDataset(self.train_data, self.config.window_dim, self.config.use_fiber,
+                                 self.config.use_tracking),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            FiberTrackingDataset(self.val_data, self.config.window_dim, self.config.use_fiber, self.config.use_tracking),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            FiberTrackingDataset(self.test_data, self.config.window_dim, self.config.use_fiber,
+                                 self.config.use_tracking),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False
+        )
+
+    def predict_dataloader(self):
+        return DataLoader(
+            FiberTrackingDataset(self.data, self.config.window_dim, self.config.use_fiber, self.config.use_tracking),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False
+        )
+
+
+class PathlessFiberTrackingDataModule(LightningDataModule):
+    """
+    A data module for loading and preparing fiber tracking data using PyTorch Lightning.
+    """
+
+    def __init__(self, config: Config, pandas_data):
+        """
+        Initialize the data module with configuration.
+        :param config: Configuration object
+        """
+        super(PathlessFiberTrackingDataModule, self).__init__()
+        self.config = config
+
+        self.pd_data = pandas_data
+        self.batch_size = config.batch_size
+        self.num_workers = config.num_workers
+
+        self.fiber_tracking_pairs = []
+        self.data = []
+
+        self.fiber_normalizer = self.normalizer()
+        self.tracking_normalizer = self.normalizer()
+
+    def normalizer(self):
+        if self.config.normalization == 'min-max':
+            return MinMaxScaler()
+        elif self.config.normalization == 'standard':
+            return StandardScaler()
+        elif self.config.normalization == 'robust':
+            return RobustScaler()
+        elif self.config.normalization == 'max-abs':
+            return MaxAbsScaler()
+        elif self.config.normalization == 'quantile':
+            return QuantileTransformer()
+        elif self.config.normalization == 'power':
+            return PowerTransformer()
+        else:
+            raise ValueError(f"Normalization method {self.config.normalization} not supported.")
+
+    def load_fiber(self, fiber_df):
+        """Load and process fiber data from a CSV file."""
+        # Get fiber channel and convert to tensor
+        fiber_channel = torch.tensor(fiber_df[self.config.fiber_channel_name].to_numpy())
+        # Get control channel
+        control_channel = torch.tensor(fiber_df[self.config.control_channel_name].to_numpy())
+        # Subtract control channel from fiber channel
+        fiber_channel -= control_channel
+        # Convert to float16 for memory efficiency
+        fiber_channel = fiber_channel.to(torch.float32)
+        return fiber_channel
+
+    def load_tracking(self, tracking_df):
+        """Load and process tracking data from a CSV file."""
+        # Get column names
+        column_names = tracking_df.columns
+        # Get columns with x, y, z
+        x_columns = [column for column in column_names if '_x' in column]
+        y_columns = [column for column in column_names if '_y' in column]
+        z_columns = [column for column in column_names if '_z' in column]
+        # Convert to tensor
+        x = torch.tensor(tracking_df[x_columns].to_numpy())
+        y = torch.tensor(tracking_df[y_columns].to_numpy())
+        z = torch.tensor(tracking_df[z_columns].to_numpy())
+        # Concatenate x, y, z
+        tracking = torch.cat([x, y, z], dim=1)
+        # Convert to float16 for memory efficiency
+        tracking = tracking.to(torch.float32)
+        return tracking
+
+    def fit_normalization(self, data):
+        """Fit normalization to data."""
+        fiber_data = torch.cat([fiber for fiber, _ in data])
+        tracking_data = torch.cat([tracking for _, tracking in data])
+        self.fiber_normalizer.fit(fiber_data.reshape(-1, 1))
+        self.tracking_normalizer.fit(tracking_data)
+
+    def normalize_data(self, data):
+        """Normalize data using the fitted normalization."""
+        return [
+            (torch.tensor(self.fiber_normalizer.transform(fiber.reshape(-1, 1)).reshape(-1)).to(torch.float32),
+             torch.tensor(self.tracking_normalizer.transform(tracking)).to(torch.float32))
+            for fiber, tracking in data
+        ]
+
+    def prepare_data(self) -> None:
+        """Prepare data by loading paths and asserting correct matches."""
+        for file_pairs in self.pd_data:
+            fiber_df = file_pairs[0]
+            tracking_df = file_pairs[1]
+            self.data.append((self.load_fiber(fiber_df), self.load_tracking(tracking_df)))
 
         # Fit normalization
         self.fit_normalization(self.data)

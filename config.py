@@ -7,7 +7,7 @@ import yaml
 class Config:
     # Basic model configuration
     d_model: int = 64
-    window_dim: int = 1000
+    window_dim: int = 1024
     nhead: int = 8
     dim_feedforward: int = 2048
     num_layers: int = 6

@@ -11,6 +11,7 @@ import wandb
 from hilbertcurve.hilbertcurve import HilbertCurve
 
 from lightning.pytorch import LightningModule
+from lightning.pytorch.loggers import WandbLogger
 from matplotlib.colors import ListedColormap
 from torch import Tensor
 
@@ -65,8 +66,9 @@ class BaseAutoencoderModule(LightningModule, ABC):
                 plt.plot(x_hat[0, :, i].cpu().detach().numpy(), label='Reconstructed')
                 plt.legend()
                 loss = nn.functional.l1_loss(target=x, input=x_hat, reduction='none')
-                self.logger.experiment.log(
-                    {f"Reconstruction Error {i}": wandb.Histogram(loss.cpu(), num_bins=100), f"Plot {i}": plt})
+                if self.logger is WandbLogger:
+                    self.logger.experiment.log(
+                        {f"Reconstruction Error {i}": wandb.Histogram(loss.cpu(), num_bins=100), f"Plot {i}": plt})
                 plt.clf()
         return loss
 
@@ -91,7 +93,7 @@ class BaseAutoencoderModule(LightningModule, ABC):
         }
 
     def on_after_backward(self):
-        if self.trainer.global_step % 25 == 0 and self.logger is not None:  # log every 25 steps
+        if self.trainer.global_step % 25 == 0 and self.logger is WandbLogger:  # log every 25 steps
             self.logger.experiment.log({"Learning Rate": self.trainer.optimizers[0].param_groups[0]['lr']})
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
