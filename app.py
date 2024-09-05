@@ -1,41 +1,40 @@
 import base64
+import copy
 import io
 import os
-import time
 from datetime import datetime, timedelta
-from gc import callbacks
+from functools import partial
 from glob import glob
 from pathlib import Path
-from socket import SocketIO
+from threading import Thread, Lock
 
-
-import matplotlib.pyplot as plt
-from flask import Flask
-from lightning import Trainer
-from torchviz import make_dot
-
-from models.lightning_models import *
-import numpy as np
+import dash_bootstrap_components as dbc
+import dash_interactive_graphviz
+import dash_mantine_components as dmc
+import kneed
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.tools as tls
+import scipy.stats as stats
+import seaborn as sns
 from dash.exceptions import PreventUpdate
 from dash_extensions.enrich import DashProxy, Output, Input, State, Serverside, html, dcc, \
     ServersideOutputTransform, callback
-import dash_mantine_components as dmc
-import dash_bootstrap_components as dbc
-import torch
-from dash_iconify import DashIconify
+from lightning.pytorch.trainer import Trainer
+from matplotlib.colors import LogNorm
+from scipy.stats import chi2
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+from torchviz import make_dot
+from tqdm import tqdm
 
-from config import Config
-from data import FiberTrackingDataModule, PathlessFiberTrackingDataModule
-from plotly_resampler import register_plotly_resampler
-import plotly.express as px
-import plotly.graph_objects as go
-import dash_interactive_graphviz
-from threading import Thread, Lock
+from data import PathlessFiberTrackingDataModule
+from models.lightning_models import *
+from models.lightning_models import TransformerAutoencoderModule_4
 
 app = DashProxy(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], transforms=[ServersideOutputTransform()])
-
-register_plotly_resampler(mode='auto')
 
 class TrainingResults:
     def __init__(self):
@@ -43,7 +42,20 @@ class TrainingResults:
         self.is_training_complete = False
         self.lock = Lock()
 
+class AnalysisResults:
+    def __init__(self):
+        self.tracking_inertia_fig = None
+        self.tracking_cluster_fig = None
+        self.encoded_inertia_fig = None
+        self.encoded_cluster_fig = None
+        self.contingency_table_fig = None
+        self.chi2_contibution_fig = None
+        self.signifcant_pairs_fig = None
+        self.is_analysis_complete = False
+        self.lock = Lock()
+
 training_results = TrainingResults()
+analysis_results = AnalysisResults()
 
 def train_model_thread(model, data):
     trainer = Trainer(
@@ -60,6 +72,205 @@ def train_model_thread(model, data):
     with training_results.lock:
         training_results.model = model
         training_results.is_training_complete = True
+
+def analyze_data_thread(model, data, sampling_rate, predict_batch_size):
+    fiber_config = copy.deepcopy(model.config)
+    fiber_config.use_fiber = True
+    fiber_config.use_tracking = False
+    fiber_config.batch_size = predict_batch_size
+    fiber_datamodule = PathlessFiberTrackingDataModule(fiber_config, data)
+    fiber_datamodule.prepare_data()
+    tracking_config = copy.deepcopy(model.config)
+    tracking_config.use_fiber = False
+    tracking_config.use_tracking = True
+    tracking_config.batch_size = predict_batch_size
+    tracking_datamodule = PathlessFiberTrackingDataModule(tracking_config, data)
+    tracking_datamodule.prepare_data()
+    tracking_data = []
+    precision = torch.float16
+    if model.config.precision == '32':
+        precision = torch.float32
+    elif model.config.precision == '16-mixed':
+        precision = torch.float16
+    elif model.config.precision == '16':
+        precision = torch.float16
+    for batch in tracking_datamodule.predict_dataloader():
+        tracking_data.append(batch[:, 0, :].to(dtype=precision))
+    tracking_data = np.concatenate(tracking_data)[::sampling_rate]
+    trainer = Trainer(
+        precision=model.config.precision,
+    )
+    encoded_data = trainer.predict(model, fiber_datamodule.predict_dataloader())
+    encoded_data = np.concatenate(encoded_data)[::sampling_rate]
+    # Find the optimal number of clusters for the tracking data
+    kmeans = KMeans()
+    inertia = []
+    range_max = 150
+    for k in tqdm(range(1, range_max)):
+        kmeans.n_clusters = k
+        kmeans.fit(tracking_data)
+        inertia.append(kmeans.inertia_)
+    # Find the elbow point
+    kneedle = kneed.KneeLocator(range(1, range_max), inertia, curve='convex', direction='decreasing')
+    print(f"Elbow Point: {kneedle.knee}")
+
+    plt.plot(range(1, range_max), inertia)
+    plt.axvline(kneedle.knee, color='red', linestyle='--')
+    plt.title('Tracking Data Inertia')
+    plt.xlabel('Number of Clusters')
+    plt.ylabel('Inertia')
+    tracking_inertia_fig = tls.mpl_to_plotly(plt.gcf())
+    plt.clf()
+
+    clustering_method = partial(KMeans, n_clusters=kneedle.knee)
+    tracking_clustering = clustering_method()
+    tracking_clustering.fit(tracking_data)
+    tracking_cluster_centers = tracking_clustering.cluster_centers_
+    tracking_pca = PCA(n_components=2)
+    tracking_data_2d = tracking_pca.fit_transform(tracking_data)
+    tracking_cluster_centers_2d = tracking_pca.transform(tracking_cluster_centers)
+    tracking_labels = tracking_clustering.labels_
+    plt.figure(figsize=(10, 7))
+
+    # First scatter plot
+    scatter1 = sns.scatterplot(
+        x=tracking_data_2d[:, 0],
+        y=tracking_data_2d[:, 1],
+        hue=tracking_labels,
+        s=1,
+        palette='tab20',
+        legend=None  # Disable legend for the first scatter plot
+    )
+
+    # Second scatter plot for cluster centers
+    scatter2 = sns.scatterplot(
+        x=tracking_cluster_centers_2d[:, 0],
+        y=tracking_cluster_centers_2d[:, 1],
+        s=100,
+        hue=range(tracking_clustering.n_clusters),
+        palette='tab20',
+        legend='brief'  # Enable legend for the second scatter plot
+    )
+
+    # Add the legend manually
+    plt.legend(title='Cluster', loc='best')
+
+    plt.title('Tracking Data Clusters')
+    plt.xlabel('Principal Component 1')
+    plt.ylabel('Principal Component 2')
+    tracking_cluster_fig = tls.mpl_to_plotly(plt.gcf())
+    plt.clf()
+
+    # Find the optimal number of clusters for the encoded data
+    kmeans = KMeans()
+    inertia = []
+    range_max = 150
+    for k in tqdm(range(1, range_max)):
+        kmeans.n_clusters = k
+        kmeans.fit(encoded_data)
+        inertia.append(kmeans.inertia_)
+
+    # Find the elbow point
+    kneedle = kneed.KneeLocator(range(1, range_max), inertia, curve='convex', direction='decreasing')
+    print(f"Elbow Point: {kneedle.knee}")
+
+    plt.plot(range(1, range_max), inertia)
+    plt.axvline(kneedle.knee, color='red', linestyle='--')
+    plt.title('Encoded Data Inertia')
+    plt.xlabel('Number of Clusters')
+    plt.ylabel('Inertia')
+    encoded_inertia_fig = tls.mpl_to_plotly(plt.gcf())
+
+    clustering_method = partial(KMeans, n_clusters=kneedle.knee)
+    encoded_clustering = clustering_method()
+    encoded_clustering.fit(encoded_data)
+    encoded_pca = PCA(n_components=2)
+    encoded_pca_data = encoded_pca.fit_transform(encoded_data)
+    encoded_pca_cluster_centers = encoded_pca.transform(encoded_clustering.cluster_centers_)
+    encoded_labels = encoded_clustering.labels_
+    plt.figure(figsize=(10, 7))
+    sns.scatterplot(x=encoded_pca_data[:, 0], y=encoded_pca_data[:, 1], hue=encoded_clustering.labels_, s=1,
+                    palette='tab20', legend=None)
+    sns.scatterplot(x=encoded_pca_cluster_centers[:, 0], y=encoded_pca_cluster_centers[:, 1], s=100,
+                    hue=range(encoded_clustering.n_clusters),
+                    palette='tab20', legend='brief')
+    plt.title('Encoded Data Clusters')
+    plt.xlabel('Principal Component 1')
+    plt.ylabel('Principal Component 2')
+    encoded_cluster_fig = tls.mpl_to_plotly(plt.gcf())
+    plt.clf()
+
+    # Create a contingency table
+    contingency_table = pd.crosstab(tracking_labels, encoded_labels, rownames=['Position Clusters'],
+                                    colnames=['Brainwave Clusters'])
+    print(contingency_table)
+    # Compute Adjusted Rand Index and Normalized Mutual Information
+    ari = adjusted_rand_score(tracking_labels, encoded_clustering.labels_)
+    nmi = normalized_mutual_info_score(tracking_labels, encoded_clustering.labels_)
+    print(f"Adjusted Rand Index: {ari}")
+    print(f"Normalized Mutual Information: {nmi}")
+    chi2_stat, p, dof, ex = stats.chi2_contingency(contingency_table)
+    print(f"Chi-Square Test: chi2={chi2_stat}, p-value={p}, dof={dof}")
+    # Plot the contingency table and the expected values
+    plt.figure(figsize=(15, 7))
+    plt.subplot(1, 2, 1)
+    sns.heatmap(contingency_table, cmap='viridis', norm=LogNorm(), annot=True, fmt='.1g')
+    plt.title('Contingency Table of Brainwave and Position Clusters')
+    plt.xlabel('Brainwave Clusters')
+    plt.ylabel('Position Clusters')
+    plt.subplot(1, 2, 2)
+    sns.heatmap(ex, cmap='viridis', norm=LogNorm(), annot=True, fmt='.1g')
+    plt.title('Expected Values of Brainwave and Position Clusters')
+    plt.xlabel('Brainwave Clusters')
+    plt.ylabel('Position Clusters')
+    plt.tight_layout()
+    contingency_table_fig = tls.mpl_to_plotly(plt.gcf())
+    plt.clf()
+
+    # Plot the difference between the observed and expected values
+    diff = contingency_table - ex
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(diff, cmap='viridis', annot=True, fmt='.1g')
+    plt.title('Difference Between Observed and Expected Values')
+    plt.xlabel('Brainwave Clusters')
+    plt.ylabel('Position Clusters')
+    chi2_contibution_fig = tls.mpl_to_plotly(plt.gcf())
+    plt.clf()
+
+    # Calculate the contribution to the Chi-square statistic for each cell
+    chi2_contributions = (contingency_table - ex) ** 2 / ex
+    # Plot the contingency table with Chi-square contributions
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(chi2_contributions, cmap='viridis', norm=LogNorm(), annot=True, fmt='.2f')
+    plt.title('Chi-square Contributions for Brainwave and Position Clusters')
+    plt.xlabel('Brainwave Clusters')
+    plt.ylabel('Position Clusters')
+    chi2_contibution_fig = tls.mpl_to_plotly(plt.gcf())
+    plt.clf()
+
+    significance_level = 0.0000001 / chi2_contributions.size
+    critical_value = chi2.ppf(1 - significance_level, df=1)
+    significant_pairs = chi2_contributions > critical_value
+    # Plot the significant pairs
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(significant_pairs, cmap='coolwarm', annot=True, cbar=False)
+    plt.title('Significant Cluster Pairs (Bonferroni-corrected)')
+    plt.xlabel('Brainwave Clusters')
+    plt.ylabel('Position Clusters')
+    signifcant_pairs_fig = tls.mpl_to_plotly(plt.gcf())
+    plt.clf()
+
+    with analysis_results.lock:
+        analysis_results.tracking_inertia_fig = tracking_inertia_fig
+        analysis_results.tracking_cluster_fig = tracking_cluster_fig
+        analysis_results.encoded_inertia_fig = encoded_inertia_fig
+        analysis_results.encoded_cluster_fig = encoded_cluster_fig
+        analysis_results.contingency_table_fig = contingency_table_fig
+        analysis_results.chi2_contibution_fig = chi2_contibution_fig
+        analysis_results.signifcant_pairs_fig = signifcant_pairs_fig
+        analysis_results.is_analysis_complete = True
+
+
 
 # Utility Functions
 def find_closest_row(data, column, target_value):
@@ -668,6 +879,82 @@ training_tab = dmc.TabsPanel(
     value="training"
 )
 
+# Start Analysis Button
+start_analysis_button = dmc.Button(
+    "Start Analysis",
+    color="blue",
+    size="md",
+    radius="sm",
+    fullWidth=True,
+    mt="md",
+    id="start-analysis-button",
+    variant="outline",
+)
+
+# Analysis Form Inputs
+sampling_rate_input = dbc.Row(
+    [
+        dbc.Label("Sampling Rate", html_for="sampling-rate", width=2),
+        dbc.Col(
+            dbc.Input(id="sampling-rate", type="number", placeholder="Enter Sampling Rate"),
+            width=10,
+        ),
+    ]
+)
+
+predict_batch_size_input = dbc.Row(
+    [
+        dbc.Label("Predict Batch Size", html_for="predict-batch-size", width=2),
+        dbc.Col(
+            dbc.Input(id="predict-batch-size", type="number", placeholder="Enter Predict Batch Size"),
+            width=10,
+        ),
+    ]
+)
+
+analysis_form = dmc.Card(dbc.Form(
+    [
+        sampling_rate_input,
+        predict_batch_size_input,
+    ],
+    id="analysis-form",
+))
+
+# Analysis Graphs
+tracking_inertia_graph = dmc.Card(dcc.Graph(id="tracking-inertia-graph"), mb="md", shadow="sm", radius="lg")
+encoded_inertia_graph = dmc.Card(dcc.Graph(id="encoded-inertia-graph"), mb="md", shadow="sm", radius="lg")
+tracking_cluster_graph = dmc.Card(dcc.Graph(id="tracking-cluster-graph"), mb="md", shadow="sm", radius="lg")
+encoded_cluster_graph = dmc.Card(dcc.Graph(id="encoded-cluster-graph"), mb="md", shadow="sm", radius="lg")
+chi2_contibution_graph = dmc.Card(dcc.Graph(id="chi2-contibution-graph"), mb="md", shadow="sm", radius="lg")
+contingency_table_graph = dmc.Card(dcc.Graph(id="contingency-table-graph"), mb="md", shadow="sm", radius="lg")
+signifcant_pairs_graph = dmc.Card(dcc.Graph(id="signifcant-pairs-graph"), mb="md", shadow="sm", radius="lg")
+
+graph_grid = dmc.SimpleGrid(
+    cols={"base": 1, "sm": 1, "md": 2, "lg": 3},
+    spacing="md",
+    verticalSpacing="md",
+    children=[
+        tracking_inertia_graph,
+        encoded_inertia_graph,
+        tracking_cluster_graph,
+        encoded_cluster_graph,
+        chi2_contibution_graph,
+        contingency_table_graph,
+        signifcant_pairs_graph,
+    ],
+    mt="xl",
+)
+
+# Analysis Tab
+analysis_tab = dmc.TabsPanel(
+    [
+        analysis_form,
+        start_analysis_button,
+        graph_grid
+    ],
+    value="analysis"
+)
+
 # Define tabs
 tabs_list = dmc.TabsList([
     dmc.TabsTab("Home", value="home"),
@@ -689,6 +976,7 @@ app.layout = dmc.MantineProvider(
                     data_tab,
                     model_tab,
                     training_tab,
+                    analysis_tab,
                 ],
                 color="blue",
                 orientation="horizontal",
@@ -976,6 +1264,51 @@ def update_training_progress(n, model, start_time, max_time):
     time_left = f"Time Remaining: {int(days)}d {int(hours)}h {int(minutes)}m {int(seconds)}s"
 
     return True, int(percent_complete), time_left, Serverside(model)
+
+@callback(
+    Output("start-analysis-button", "loading", allow_duplicate=True),
+    Input("start-analysis-button", "n_clicks"),
+    State("model-store", "data"),
+    State("data-store", "data"),
+    State("sampling-rate", "value"),
+    State("predict-batch-size", "value"),
+    prevent_initial_call=True
+)
+def start_analysis(n_clicks, model, data, sampling_rate, predict_batch_size):
+    if n_clicks is None or model is None or data is None:
+        raise PreventUpdate
+
+    thread = Thread(target=analyze_data_thread, args=(model, data, sampling_rate, predict_batch_size))
+    thread.start()
+
+    return True
+
+@callback(
+    Output("tracking-inertia-graph", "figure"),
+    Output("tracking-cluster-graph", "figure"),
+    Output("encoded-inertia-graph", "figure"),
+    Output("encoded-cluster-graph", "figure"),
+    Output("contingency-table-graph", "figure"),
+    Output("chi2-contibution-graph", "figure"),
+    Output("signifcant-pairs-graph", "figure"),
+    Output("start-analysis-button", "loading"),
+    Input("interval-component", "n_intervals"),
+)
+def update_analysis_graphs(n):
+    with analysis_results.lock:
+        if analysis_results.is_analysis_complete:
+            tracking_inertia_fig = analysis_results.tracking_inertia_fig
+            tracking_cluster_fig = analysis_results.tracking_cluster_fig
+            encoded_inertia_fig = analysis_results.encoded_inertia_fig
+            encoded_cluster_fig = analysis_results.encoded_cluster_fig
+            contingency_table_fig = analysis_results.contingency_table_fig
+            chi2_contibution_fig = analysis_results.chi2_contibution_fig
+            signifcant_pairs_fig = analysis_results.signifcant_pairs_fig
+
+            return tracking_inertia_fig, tracking_cluster_fig, encoded_inertia_fig, encoded_cluster_fig, contingency_table_fig, chi2_contibution_fig, signifcant_pairs_fig, False
+        else:
+            raise PreventUpdate
+
 
 if __name__ == '__main__':
     app.run_server(debug=True)
